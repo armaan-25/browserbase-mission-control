@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>two clients, one browser</title>
+<meta name="description" content="Stagehand v4 lets multiple clients share a browser — and step on each other. A write lease that stops them.">
+<meta property="og:title" content="two clients, one browser">
+<meta property="og:description" content="Two CDP clients writing to the same page. One destroys the other's work. A write lease fixes it.">
+<style>
+  :root{
+    --bg:#08090b; --line:#1b2029; --text:#f2f5f8; --dim:#6f7987; --faint:#3b4450;
+    --bad:#ff4d4d; --blue:#4d9fff; --blue-dim:#1e3a5f;
+  }
+  *{box-sizing:border-box;margin:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+    padding:34px 24px 44px; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:940px;margin:0 auto}
+
+  h1{font-size:12px;letter-spacing:.3em;font-weight:600}
+  .sub{color:var(--dim);margin-top:6px;font-size:12px}
+  .sub a{color:var(--dim)}
+  .sub a:hover{color:var(--blue)}
+  .quote{
+    margin:22px 0 26px;padding:13px 16px;border-left:2px solid var(--blue-dim);
+    background:#0c1016;color:var(--dim);font-size:12px;line-height:1.65;border-radius:0 5px 5px 0;
+  }
+  .quote a{color:var(--blue);text-decoration:none}
+  .quote a:hover{text-decoration:underline}
+  .quote cite{display:block;margin-top:7px;font-style:normal;color:var(--faint);font-size:11px}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+  @media(max-width:760px){.cols{grid-template-columns:1fr;gap:30px}}
+  .hd{display:flex;align-items:baseline;gap:9px;margin-bottom:11px}
+  .hd b{font-size:10px;letter-spacing:.2em;font-weight:600}
+  .hd .tag{font-size:9px;letter-spacing:.14em;color:var(--faint)}
+
+  .screen{
+    position:relative;border-radius:8px;overflow:hidden;background:#0d1015;
+    aspect-ratio:460/560;box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;
+  }
+  .raw .screen{box-shadow:0 0 0 1px #3a1f22}
+  .leased .screen{box-shadow:0 0 0 1px var(--blue-dim)}
+  .screen img{grid-area:1/1;width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .18s}
+  .screen.on img{opacity:1}
+  .wait{grid-area:1/1;display:flex;flex-direction:column;align-items:center;gap:11px;
+        color:var(--faint);font-size:10px;letter-spacing:.22em}
+  .screen.on .wait{display:none}
+  .wait i{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);
+          border-top-color:var(--blue);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .log{margin-top:13px;min-height:118px;font-size:11px}
+  .log div{padding:1.5px 0;color:var(--dim)}
+  .log .l{color:var(--blue)}
+  .verdict{margin-top:8px;display:flex;align-items:center;gap:11px;
+           font-size:26px;font-weight:500;opacity:0;transition:opacity .3s}
+  .verdict.on{opacity:1}
+  .verdict small{font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+                 color:var(--dim);font-weight:400}
+  .bad{color:var(--bad)} .good{color:var(--blue)}
+
+  .bar{display:flex;gap:14px;align-items:center;justify-content:center;margin-top:30px}
+  button{background:none;border:1px solid var(--line);color:var(--dim);font:inherit;
+         padding:6px 14px;border-radius:5px;cursor:pointer}
+  button:hover{color:var(--text);border-color:#2c3543}
+
+  .how{margin-top:44px;padding-top:26px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;line-height:1.75}
+  .how h2{font-size:10px;letter-spacing:.2em;color:var(--faint);margin-bottom:12px;font-weight:600}
+  .how p{margin-bottom:12px;max-width:70ch}
+  .how code{color:var(--blue);font-size:11.5px}
+  .how a{color:var(--blue)}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TWO CLIENTS · ONE BROWSER</h1>
+  <div class="sub">
+    signed in to <a href="https://www.saucedemo.com">saucedemo.com</a>, 3 items in the cart,
+    checkout open · a second client navigates mid-fill
+  </div>
+
+  <blockquote class="quote">
+    “What they can still do is step on each other inside the browser. Two clients that navigate or
+    close the same page, set cookies, or intercept requests, are both writing to the same state,
+    and nothing in CDP monitors that.”
+    <cite>— Browserbase, <a href="https://www.browserbase.com/blog/stagehand-v4">Stagehand v4</a>, 10 Aug 2026</cite>
+  </blockquote>
+
+  <div class="cols">
+    <div class="raw">
+      <div class="hd"><b>NO COORDINATION</b><span class="tag">RAW CDP</span></div>
+      <div class="screen" id="sc-raw"><div class="wait"><i></i>LOADING</div><img id="s-raw" alt="browser with no coordination"></div>
+      <div class="log" id="l-raw"></div>
+      <div class="verdict" id="v-raw"></div>
+    </div>
+    <div class="leased">
+      <div class="hd"><b>WRITE LEASE</b><span class="tag">LEASE.TS</span></div>
+      <div class="screen" id="sc-leased"><div class="wait"><i></i>LOADING</div><img id="s-leased" alt="browser with a write lease"></div>
+      <div class="log" id="l-leased"></div>
+      <div class="verdict" id="v-leased"></div>
+    </div>
+  </div>
+
+  <div class="bar"><button id="again">replay</button></div>
+
+  <div class="how">
+    <h2>WHAT THIS IS</h2>
+    <p>
+      Stagehand v4 moved state management into the browser and let other clients attach alongside it.
+      Two clients can now write to the same page, and CDP arbitrates nothing — so one client’s
+      navigation silently destroys another’s work, with no error raised on either side.
+    </p>
+    <p>
+      Left is that collision, reproduced. Right is the same two clients behind a write lease:
+      <code>stagehand</code> holds the page, <code>playwright</code> queues, and its navigation runs
+      after the form is complete rather than through it. Deferred, never dropped.
+    </p>
+    <p>
+      The lease is ~140 lines with no browser dependencies — <code>pageId</code> is just a string key.
+      Grants carry a TTL, because an automation client dying mid-write is the normal case and a plain
+      mutex would wedge the page forever. Reads never queue.
+    </p>
+    <p>
+      Both panes are real Chromium pages on a real site —
+      <a href="https://www.saucedemo.com">saucedemo.com</a>, Sauce Labs’ public automation-practice
+      app, using its own published demo credentials. Nothing is submitted; the collision happens
+      while typing.
+    </p>
+    <p>
+      What is lost is not two text fields. Each pane starts from a session that took a login, three
+      cart additions and a walk through to checkout to build. The second client’s navigation throws
+      all of it away — and the first client never learns that it happened.
+    </p>
+    <p>
+      The frames here are screenshots of an actual run, replayed — every pixel came out of a browser
+      that was genuinely being written to by two clients.
+    </p>
+  </div>
+</div>
+
+<script>
+  var els = {
+    raw: { sc: document.getElementById("sc-raw"), img: document.getElementById("s-raw"),
+           log: document.getElementById("l-raw"), v: document.getElementById("v-raw") },
+    leased: { sc: document.getElementById("sc-leased"), img: document.getElementById("s-leased"),
+              log: document.getElementById("l-leased"), v: document.getElementById("v-leased") }
+  };
+  var events = null, timers = [];
+
+  function reset() {
+    timers.forEach(clearTimeout); timers = [];
+    ["raw", "leased"].forEach(function (r) {
+      els[r].log.innerHTML = "";
+      els[r].v.className = "verdict";
+      els[r].sc.classList.remove("on");
+    });
+  }
+
+  function apply(e) {
+    var el = els[e.run];
+    if (e.kind === "shot") {
+      el.img.src = "data:image/jpeg;base64," + e.data;
+      el.sc.classList.add("on");
+    } else if (e.kind === "log") {
+      var d = document.createElement("div");
+      if (e.lease) { d.className = "l"; d.textContent = "[lease] " + e.text; }
+      else { d.textContent = e.text; }
+      el.log.appendChild(d);
+    } else if (e.kind === "verdict") {
+      var of = e.of || 3;
+      var ok = e.filled === of;
+      el.v.className = "verdict on " + (ok ? "good" : "bad");
+      el.v.innerHTML =
+        (ok ? "&check;" : "&times;") +
+        "<small>" + (e.reached || e.filled + "/" + of + " fields survived") + "</small>";
+    }
+  }
+
+  function play() {
+    reset();
+    events.forEach(function (e) { timers.push(setTimeout(function () { apply(e); }, e.t)); });
+  }
+
+  document.getElementById("again").onclick = function () { if (events) play(); };
+
+  fetch("frames.json")
+    .then(function (r) { return r.json(); })
+    .then(function (data) { events = data; play(); })
+    .catch(function () {
+      document.getElementById("l-raw").textContent = "could not load frames.json";
+    });
+</script>
+</body>
+</html>
