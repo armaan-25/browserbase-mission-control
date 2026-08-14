@@ -35,6 +35,7 @@ checkout, and the navigation runs afterwards. Deferred, never dropped.
 | `demo.ts` | Terminal proof: prints the before and after. |
 | `record.ts` | Drives both runs against the live site, bakes frames for the page. |
 | `site/` | Static page replaying a real recorded run. Two files, no server. |
+| `browser-write-lease.mp4` | 14s recording of that page, for posting. |
 
 ## Run it
 
