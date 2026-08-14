@@ -67,7 +67,10 @@ async function typeInto(client: CDPSession, id: string, text: string) {
   for (const ch of text) {
     await client.send("Input.dispatchKeyEvent", { type: "keyDown", text: ch });
     await client.send("Input.dispatchKeyEvent", { type: "keyUp" });
-    await new Promise((r) => setTimeout(r, 60));
+    // Deliberately slower than a machine needs to be. The fill is the part a
+    // viewer has to see happening, and at machine speed it is over before the
+    // eye registers that anything was typed.
+    await new Promise((r) => setTimeout(r, 110));
   }
 }
 
@@ -179,7 +182,7 @@ async function runRaw(browser: Browser) {
   const b = await page.context().newCDPSession(page);
   push({ run: "raw", kind: "log", text: "stagehand → filling checkout" });
   const filling = fillCheckout(a);
-  await new Promise((r) => setTimeout(r, 2_200));
+  await new Promise((r) => setTimeout(r, 3_600));
   push({ run: "raw", kind: "log", text: "playwright → Page.navigate (nothing arbitrates)" });
   await b.send("Page.navigate", { url: RIVAL });
   await filling.catch(() => {});
@@ -221,7 +224,7 @@ async function runLeased(browser: Browser) {
     },
     60_000,
   );
-  await new Promise((r) => setTimeout(r, 2_200));
+  await new Promise((r) => setTimeout(r, 3_600));
   push({ run: "leased", kind: "log", text: "playwright → Page.navigate (queued)" });
   const navigating = lease.withWrite("checkout", "playwright", async () => {
     await b.send("Page.navigate", { url: RIVAL });
