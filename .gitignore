@@ -1,0 +1,5 @@
+node_modules/
+*.log
+
+# Playwright's own recording output, when filming the site.
+videos/

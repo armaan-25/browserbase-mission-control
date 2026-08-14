@@ -25,7 +25,22 @@ into a page that no longer exists. Worse than a crash: the page it lands on
 looks perfectly healthy, so an agent would report success.
 
 With a write lease the second client's navigation queues, the first finishes
-checkout, and the navigation runs afterwards. Deferred, never dropped.
+checkout and reaches the order summary, and the navigation runs afterwards.
+Deferred, never dropped.
+
+## Run it
+
+```bash
+npm install
+npx playwright install chromium
+
+npm run demo      # terminal: prints both runs against the live site
+npm run record    # re-record site/frames.json from a fresh run
+npm run site      # serve the static page on :4790
+```
+
+`node demo.ts --remote` drives a real Browserbase session instead of local
+Chrome and needs `BROWSERBASE_API_KEY` in the environment.
 
 ## Files
 
@@ -36,21 +51,11 @@ checkout, and the navigation runs afterwards. Deferred, never dropped.
 | `demo.ts` | Terminal front-end: prints the scenario. |
 | `record.ts` | Capture front-end: films the scenario into `site/frames.json`. |
 | `site/` | Static page replaying a real recorded run. Two files, no server. |
-| `browser-write-lease.mp4` | 14s recording of that page, for posting. |
+| `browser-write-lease-16x9.mp4` | 14s recording of that page. |
 
 `demo.ts` and `record.ts` are thin: they choose how progress is reported and
 nothing else. Anything a viewer could disagree about lives in `scenario.ts`, so
 the terminal output and the recorded page cannot show different things.
-
-## Run it
-
-```bash
-node mutex/demo.ts                       # local Chrome, free
-node --env-file=.env mutex/demo.ts --remote   # a real Browserbase session
-
-node mutex/record.ts                     # re-record site/frames.json
-cd mutex/site && python3 -m http.server 4790
-```
 
 ## Design
 
@@ -62,7 +67,7 @@ late write (see `isHeldBy`).
 **Reads never queue.** Concurrent reads cannot corrupt state, and blocking them
 would make this a bottleneck rather than a guardrail.
 
-**Page-scoped, not browser-scoped.** `pageId` is just a string key; the lease
+**Page-scoped, not browser-scoped.** `pageId` is just a string key; the module
 imports nothing from Playwright or CDP. Arbitration is not a browser concern.
 
 **Opt-in.** Clients route writes through `withWrite`. Transparent enforcement
@@ -80,3 +85,7 @@ replayed. Every pixel came out of a browser that was genuinely being written to
 by two clients. saucedemo.com is Sauce Labs' public automation-practice app and
 the run uses its own published demo credentials. Nothing is submitted; the
 collision happens while typing, and the Finish button is never clicked.
+
+The lease has no offline test suite yet. The demo exercises the happy path;
+TTL expiry, queue ordering under contention, and the conditional-release path
+are covered only by inspection.

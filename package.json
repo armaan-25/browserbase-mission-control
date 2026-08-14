@@ -1,0 +1,23 @@
+{
+  "name": "browser-write-lease",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A write lease for browser pages shared by multiple CDP clients",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "demo": "node demo.ts",
+    "record": "node record.ts",
+    "site": "cd site && python3 -m http.server 4790",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
