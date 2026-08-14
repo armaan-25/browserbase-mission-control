@@ -31,11 +31,16 @@ checkout, and the navigation runs afterwards. Deferred, never dropped.
 
 | Path | What it is |
 | --- | --- |
-| `lease.ts` | The mechanism. ~140 lines, no browser dependencies. |
-| `demo.ts` | Terminal proof: prints the before and after. |
-| `record.ts` | Drives both runs against the live site, bakes frames for the page. |
+| `lease.ts` | The mechanism. ~190 lines, no browser dependencies. |
+| `scenario.ts` | The site, the CDP writes, and both runs. One source of truth. |
+| `demo.ts` | Terminal front-end: prints the scenario. |
+| `record.ts` | Capture front-end: films the scenario into `site/frames.json`. |
 | `site/` | Static page replaying a real recorded run. Two files, no server. |
 | `browser-write-lease.mp4` | 14s recording of that page, for posting. |
+
+`demo.ts` and `record.ts` are thin: they choose how progress is reported and
+nothing else. Anything a viewer could disagree about lives in `scenario.ts`, so
+the terminal output and the recorded page cannot show different things.
 
 ## Run it
 
