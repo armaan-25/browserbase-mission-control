@@ -2,81 +2,26 @@
 
 Concepts and library behaviour this code depends on, tied to where they appear.
 
-## Fencing tokens (`handoff/ownership.ts`)
+## Idempotency keys (`resolve.ts`, `page.html` `keyFor`)
 
-A lease says who holds something now. A fencing token says whether a writer is
-still the one that was given it. Each change of owner increments `generation`,
-each attached loop process gets a `holder` id, and every write must present both.
-A process that was paused, restarted, or left behind is refused.
-
-Why both: the first version used the generation alone, and review found the gap.
-If a loop restarts while a person holds the browser, the old and new process wait
-on the same hand-back and both read the same new generation from it. The holder
-id says which of them the run now belongs to (`test/client.test.ts`, "restart
-during a handoff").
-
-Rejected alternative: the TTL lease in `lease.ts`. Its expiry hands the page to
-the next waiter, which is correct between two scripts and wrong for a person, who
-would lose the browser mid-task. Here nothing but an explicit hand-back returns
-control to the agent.
-
-## Idempotency keys (`service.ts`, `inbox.html`)
-
-The inbox creates one key per card and keeps it in `sessionStorage`. A resend
-after a lost response carries the same key, and the service answers it with the
-stored result (`replay: true`) instead of a second transition. A different key on
-an already-handed-back request is a genuine second click and gets 409.
-
-## Long polling (`service.ts` `waitForChange`, `client.ts` `awaitOutcome`)
-
-The loop asks "has this request changed?" and the service holds the response open
-for up to 25 s. The outcome is stored before anyone is woken, so a dropped poll is
-harmless: the loop asks again and gets the same stored answer. Rejected
-alternative: server-sent events, which need reconnection and replay logic for the
-same guarantee.
-
-## `BEGIN IMMEDIATE` in SQLite (`store.ts`)
+The page creates one key per attempt at a pause and keeps it in `sessionStorage`.
+A resend after a lost response, a refresh, or a double-click carries the same key,
+and the inbox answers it with the recorded outcome instead of a second `/resume`.
+A different key on a pause that already has a reply is refused. Every key ever
+used on a pause is kept, so no earlier click can send twice.
+## `BEGIN IMMEDIATE` in SQLite (`store.ts` `tx`)
 
 A plain `BEGIN` takes the write lock only at the first write, so two transactions
 could both read "open" before either writes. `IMMEDIATE` takes it at the start;
 the second waits (`busy_timeout`) and then reads the first one's result. The
-"concurrent hand-backs" test fires three at once and exactly one wins.
-
+"duplicate replies" test in `test/agents-flow.test.ts` fires concurrent clicks
+and exactly one `/resume` is sent.
 ## `node:sqlite`
 
 Built into Node 22.5+ (`DatabaseSync`, prepared statements, synchronous).
 Synchronous is fine here: one small local database, and it keeps each
 transaction free of interleaving `await`s. Node prints an ExperimentalWarning on
 first use.
-
-## `Proxy` as a guard (`client.ts` `guard`)
-
-`h.page` is a `Proxy` over the real Stagehand `Page`. Its `get` trap returns
-reads unchanged and wraps every other method in the ownership check. Unknown
-methods are treated as writes, so a new Stagehand method is refused until someone
-decides it is a read. Methods are applied with the real object as `this`, so
-Stagehand's own getters and private members keep working
-(`test/stagehand-local.test.ts` checks this against the real classes).
-
-## Stagehand v4 facts this relies on
-
-- `browserbase.launch({ apiKey, keepAlive, api_timeout })` creates a session.
-  The SDK field is `api_timeout`; it is sent to the API as `timeout`.
-- With `keepAlive: true`, `browser.close()` leaves the session running, and
-  `browserbase.connect({ apiKey, sessionId })` attaches to it again.
-- Omitting `model` routes inference through Model Gateway (billed by Browserbase).
-  Gateway needs a Browserbase session: locally, `act()` fails even when replaying
-  a fixed `Action`, so local tests use `page`/`locator` calls only.
-- A step's `timeout` is not an upper bound, and calls are not serialised (see
-  `ARCHITECTURE.md`, measured by `examples/inflight-experiment.ts`).
-
-## Dependency added
-
-`@browserbasehq/stagehand@4.1.0`: the agent runtime the handoff wraps. Without
-it the guard has nothing real to wrap and the Browserbase launch/connect
-lifecycle would be reimplemented by hand. It brings `@browserbasehq/sdk`, `zod`
-and OpenTelemetry with it. To learn: `browserbase.launch/connect`,
-`Stagehand.create`, `act/observe/extract`, and `Page`/`Locator`.
 
 ## Agent inbox (`inbox/`)
 
@@ -117,7 +62,7 @@ interval to milliseconds. The limit is written down rather than hidden.
 
 `@browserbasehq/sdk` 2.21.0 has no `resume`, and its client retries 409 and 5xx
 by default, including POSTs. For `/resume` that is the one behaviour the inbox
-must never have. `api.ts` uses `fetch` with a timeout and no retries.
+must never have. `api.ts` uses `fetch` with a timeout and no retries. Retries can be turned off per call (`{ maxRetries: 0 }`), so `resume` is the only real blocker; the changelog's `bb.agents.runs.resume` example is not in the published package.
 
 ### A simulator instead of mocks (`fake-browserbase.ts`)
 

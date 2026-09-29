@@ -1,17 +1,11 @@
 # Architecture
 
-This repo holds three things:
+An inbox for Browserbase Agents runs. Runs that pause (`pauseWhen` → `PAUSED`)
+become cards a person can answer or take over; each reply becomes at most one
+`/resume` call, never resent blindly. When runs share a saved login (a
+Browserbase Context), a person's sign-in carries over and later runs do not
+pause ("help once"). Code: `inbox/`; test login site: `agent-login-test/`.
 
-1. **Agent inbox** (`inbox/`), the main product. Browserbase Agents runs that
-   pause (`pauseWhen` → `PAUSED`) become cards a person can answer or take over;
-   each reply becomes at most one `/resume` call, never resent blindly. See the first half of
-   this file.
-2. **Stagehand handoff** (`handoff/`). The same idea for a developer-owned
-   Stagehand v4 loop, where the handoff can be *enforced*. See the second half.
-3. **The write lease** (`lease.ts`, `scenario.ts`, `demo.ts`, `record.ts`,
-   `site/`). Two automated CDP clients on one page. Unchanged; see `README.md`.
-
-# Part A: Agent inbox (`inbox/`)
 
 ## What Browserbase provides, and what this adds
 
@@ -190,115 +184,4 @@ the browser entirely (live Run 1 used an HTTP strategy with no session).
 
 - **Polling → webhooks:** only `sync.ts` changes; a webhook handler calls `syncRun(runId)`.
 - **SQLite → a server database:** only `store.ts`.
-- **Browserbase SDK:** `api.ts` could call it once it has `resume` and retries can be disabled per call.
-
-# Part B: Stagehand handoff (`handoff/`)
-
-A developer's Stagehand v4 loop asks a person for help, gives up the browser,
-and gets it back with a fresh look at the page. Here every agent action passes
-through a guard, so the handoff is enforced rather than recorded.
-
-## The flow
-
-```text
-developer's loop                       handoff service (127.0.0.1)              person
-────────────────                       ───────────────────────────              ──────
-attachHandoff(...)        ──POST /api/runs──▶  run: owner=agent, gen=1, holder=this process
-h.page.goto(...)          ──GET /api/runs/r─▶  gate: agent @ gen 1, holder me? yes → write runs
-h.requestHuman(...)
-  stop new writes, wait for running ones
-  read url + title
-                          ──POST …/requests─▶  owner=human, gen=2, request open
-  long-poll               ──GET …?wait=25s──▶                          inbox card + Live View
-                                                                        acts in the browser
-                                               ◀──POST …/handback──── "Hand back" (gen 2, key)
-                                               owner=agent, gen=3
-  ◀────────── request handed_back ──────────
-  read url, title, snapshot  (the fresh observation)
-                          ──POST …/observation─▶ receipt stored
-  continue with gen 3
-```
-
-## Where state lives
-
-| State | Where | Owner |
-|---|---|---|
-| Who may write, the generation, the holder process | `runs` table in `handoff.db` | `handoff/store.ts`, rules in `handoff/ownership.ts` |
-| Requests, notes, observations | `requests` table | same |
-| Receipt / timeline | `events` table (append-only) | same |
-| The generation this loop holds | memory in `handoff/client.ts` | re-read from the service on attach |
-| Live View URL | nowhere; fetched per card | `handoff/browserbase.ts` |
-
-The loop and the inbox hold no ownership state of their own, which is why either
-can restart without changing who holds the browser.
-
-## Modules
-
-| File | Runtime | Responsibility |
-|---|---|---|
-| `handoff/ownership.ts` | anywhere (pure) | The state machine: owners `agent / human / stopped`, the generation, the holder, and the only allowed transitions. |
-| `handoff/store.ts` | service process | `node:sqlite` persistence. Each change is read → rule → write inside `BEGIN IMMEDIATE`. |
-| `handoff/service.ts` | service process | HTTP API, long-poll, Host/Origin checks, note redaction, the expiry watcher. |
-| `handoff/browserbase.ts` | service process | Session liveness and Live View URL over Browserbase REST. No retries. |
-| `handoff/inbox.html` | person's browser | One card per request; hand-back with an idempotency key kept in `sessionStorage`. |
-| `handoff/client.ts` | developer's process | `attachHandoff`: the guarded `stagehand`/`page`, in-flight tracking, `requestHuman`. |
-| `handoff/serve.ts` | — | Entry point for the service. |
-| `examples/handoff.ts` | developer's process | The milestone loop on saucedemo.com (local or Browserbase). |
-| `examples/inflight-experiment.ts` | — | The measurement behind the in-flight rules (below). |
-
-## Guarantees, and where each one stops
-
-| Property | Enforced by | Does not cover |
-|---|---|---|
-| Agent writes respect ownership | Every non-read method on `h.stagehand`, `h.page` and its locators asks the service "agent, at my generation, and am I the holder?" before running. Refused, not queued. `page.tools()` and `stagehand.experimentalBatch()` are refused outright: they return handles whose methods the guard cannot follow. | The raw `stagehand`/`page`, `stagehand.browser`, and anything the Stagehand extension does by itself (e.g. a domain policy closing a popup). A zombie process whose check passes just before being fenced can still land one write: the browser itself does not check the generation. |
-| In-flight steps finish before a person gets control | `requestHuman` blocks new writes, then awaits every running write's own promise. | A step whose client gave up (`RPC response timed out`, dropped connection) may still be running in the extension. `requestHuman` refuses (`UncertainStepError`) until the developer checks the page and calls `clearUncertainStep()`. |
-| No duplicate or stale hand-back | Hand-back must name the request's generation and must be for the run's current request. Same idempotency key → the first result again; different key → 409. | — |
-| Expiry and restarts never resume the agent | Only `handBack` moves `human → agent`. Session end moves to `stopped`. Re-attaching never takes the browser from a person, but makes the new process the holder, so an older process still waiting on the same hand-back is told it was superseded and cannot write. An unreachable service refuses writes. | Detecting expiry needs `BROWSERBASE_API_KEY` in the service; local browsers are not watched. |
-| Fresh context after hand-back | The loop reads `url`, `title`, `snapshot()` through its own Stagehand connection before its writes are re-enabled, records it as the receipt, and only then returns from `requestHuman`. If the receipt cannot be recorded, `requestHuman` throws and a second call with the same key collects the same outcome. | It shows the page as it is now, not what the person did. The person's note is the only record of that. |
-
-### Why in-flight handling looks like this
-
-Measured against Stagehand 4.1.0 on local Chrome (`node examples/inflight-experiment.ts`):
-
-- `page.goto(url, { timeout: 500 })` against a server that answers in 3 s
-  **resolved after ~3 s**. A step `timeout` does not bound how long a step runs.
-- `page.url()` issued 100 ms into that navigation **answered in ~100 ms**. The
-  extension does not serialise calls, so a later call returning proves nothing
-  about an earlier one.
-- `locator.click()` on a missing element fails immediately and nothing lands later.
-
-So the wrapper tracks each write's own promise, and treats "the client stopped
-waiting" as unknown rather than finished.
-
-## Security
-
-- The service binds `127.0.0.1`, rejects other `Host` headers (DNS rebinding) and
-  cross-origin POSTs. There is no authentication: do not expose it.
-- `BROWSERBASE_API_KEY` is read only by the service process and the example.
-- The Live View URL controls a live browser. It is served only while its request
-  is open, embedded with `referrerpolicy=no-referrer`, never stored or logged.
-- Notes are redacted (6–10 digit runs, `bb_live_…`/`sk-…` keys) before storage.
-  The inbox tells people not to paste codes; during a takeover, codes are typed
-  into the browser, never into this app.
-
-## Replacing a dependency
-
-- **Stagehand**: `client.ts` depends only on the `ObservablePage` shape
-  (`url`, `title`, `snapshot`) plus method names in the read allowlists.
-  Another driver needs those three reads and an updated allowlist.
-- **SQLite**: only `store.ts` touches it; its methods are the whole interface.
-- **Browserbase**: only `browserbase.ts` and `examples/handoff.ts`.
-
-## Not verified
-
-- The `UNCERTAIN` pattern in `client.ts` matches Stagehand's `RPC response timed out`
-  and closed-client messages as read from its source; no test produces a real
-  client-side RPC timeout.
-- Two service processes on one `handoff.db`: `BEGIN IMMEDIATE` should serialise
-  them, but the tests run one process.
-
-## Not built yet (handoff)
-
-Answer-only requests exist in the model (`kind: "answer"`) but the handoff inbox
-has no answer field beyond the note. Live Browserbase behaviour (Live View during
-handoff, `keepAlive` re-attach, expiry timing) is untested.
+- **Browserbase SDK:** `api.ts` could call it once the SDK has `runs.resume` (2.21.0 does not). Its default retries (409, 5xx) must then be turned off per call with `{ maxRetries: 0 }`, which the SDK already supports.

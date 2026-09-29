@@ -3,24 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An inbox for Browserbase Agents runs that pause for a person, plus the browser write lease and a Stagehand handoff",
+  "description": "An inbox for Browserbase Agents runs that pause for a person, where a person's help carries over to later runs",
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
-    "demo": "node demo.ts",
-    "record": "node record.ts",
-    "site": "cd site && python3 -m http.server 4790",
     "typecheck": "tsc --noEmit",
-    "handoff:serve": "node --env-file-if-exists=.env handoff/serve.ts",
-    "handoff:local": "node examples/handoff.ts --local",
     "test": "node --test --test-concurrency=1 test/*.test.ts",
     "inbox": "node --env-file-if-exists=.env inbox/serve.ts",
     "inbox:demo": "node inbox/demo.ts",
     "inbox:remember": "node inbox/demo-remember.ts"
   },
   "dependencies": {
-    "@browserbasehq/stagehand": "^4.1.0",
     "playwright": "^1.62.1"
   },
   "devDependencies": {
