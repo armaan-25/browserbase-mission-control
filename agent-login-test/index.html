@@ -1,0 +1,55 @@
+<!doctype html>
+<!--
+  A login page for testing Browserbase Contexts with Agents runs (see inbox/remember.ts).
+  Nothing here reveals the password: only its SHA-256 is stored. A correct login saves a
+  code derived from the password in a 1-day cookie, and account.html shows that code.
+  An agent that has not been signed in by a person cannot produce the code.
+-->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Acme Billing — sign in</title>
+<style>
+  body { font: 16px system-ui, sans-serif; background: #f6f5f2; color: #222; margin: 0; display: grid; place-items: center; min-height: 100vh; }
+  form { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 28px; width: min(340px, calc(100vw - 32px)); box-sizing: border-box; }
+  h1 { font-size: 20px; margin: 0 0 18px; }
+  label { display: block; font-size: 14px; margin: 12px 0 4px; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 9px 10px; border: 1px solid #bbb; border-radius: 6px; }
+  button { margin-top: 18px; width: 100%; font: inherit; font-weight: 600; padding: 10px; border: 0; border-radius: 6px; background: #1d5fd1; color: #fff; cursor: pointer; }
+  #error { color: #b3261e; font-size: 14px; min-height: 1.2em; margin: 12px 0 0; }
+</style>
+<form id="login">
+  <h1>Acme Billing</h1>
+  <p id="notice" style="font-size:14px;color:#555;margin:0"></p>
+  <label for="username">Username</label>
+  <input id="username" autocomplete="username" required>
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="current-password" required>
+  <button type="submit">Sign in</button>
+  <p id="error" role="alert"></p>
+</form>
+<script>
+  const USER = "armaan";
+  const PASSWORD_SHA256 = "f7392afc538e234da67f65e4750ddb515f73e899aac3364e1e64d63ce4b4e766";
+  const sha256 = async (text) =>
+    [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+
+  if (new URLSearchParams(location.search).has("next")) {
+    document.getElementById("notice").textContent = "Please sign in to see your account.";
+  }
+  document.getElementById("login").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const user = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    if (user !== USER || (await sha256(password)) !== PASSWORD_SHA256) {
+      document.getElementById("error").textContent = "Wrong username or password.";
+      return;
+    }
+    const code = "INV-" + (await sha256(password + ":invoice")).slice(0, 8).toUpperCase();
+    document.cookie = `acme_invoice=${code}; Max-Age=86400; Path=/; Secure; SameSite=Lax`;
+    location.href = "/account.html";
+  });
+</script>
+</html>

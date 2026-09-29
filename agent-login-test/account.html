@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- Shows the invoice code only when the cookie set by a real sign-in is present. See index.html. -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Acme Billing — account</title>
+<style>
+  body { font: 16px system-ui, sans-serif; background: #f6f5f2; color: #222; margin: 0; padding: 40px 16px; }
+  main { max-width: 480px; margin: 0 auto; background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 28px; }
+  #code { font: 600 22px ui-monospace, monospace; }
+</style>
+<main hidden>
+  <h1>Your account</h1>
+  <p>Latest invoice number:</p>
+  <p id="code"></p>
+</main>
+<script>
+  const CODE_SHA256 = "d804c44703eb9e3cde14dcefdbe737ffed405322a456038afa8cf58a30e1995b";
+  (async () => {
+    const code = document.cookie.split("; ").find((c) => c.startsWith("acme_invoice="))?.split("=")[1] ?? "";
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code)))]
+      .map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (digest !== CODE_SHA256) return location.replace("/?next=account");
+    document.getElementById("code").textContent = code;
+    document.querySelector("main").hidden = false;
+  })();
+</script>
+</html>

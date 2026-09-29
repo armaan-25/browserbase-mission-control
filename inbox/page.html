@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Agent inbox</title>
+<style>
+  :root { --bg:#f5f5f2; --card:#fff; --line:#e1e1dc; --text:#1a1a19; --dim:#62625d; --soft:#f0f0ec;
+          --accent:#1d5fd1; --accent-hover:#174fb0; --ok:#1e7a45; --warn:#9a5208; --bad:#b3261e;
+          --warn-soft:#fbf0e2; --bad-soft:#fbe9e7; --ok-soft:#e6f3eb; --focus:#1d5fd1; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#131313; --card:#1c1c1b; --line:#2e2e2c; --text:#ececea; --dim:#a3a39d; --soft:#242423;
+            --accent:#6ea0ff; --accent-hover:#8cb4ff; --ok:#5cc98c; --warn:#f0a55a; --bad:#ff7b72;
+            --warn-soft:#33261a; --bad-soft:#3a1e1c; --ok-soft:#18301f; --focus:#8cb4ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .sim-bar { background: #b3261e; color: #fff; font-size: 13px; font-weight: 600; text-align: center; padding: 6px 16px; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { margin-bottom: 8px; }
+  h1 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 2px; }
+  .lede { color: var(--dim); margin: 0; }
+  .summary { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 16px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--dim); }
+  .summary b { font-variant-numeric: tabular-nums; color: var(--text); margin-right: 4px; }
+  .summary .zero { opacity: .6; } .summary .zero b { color: var(--dim); }
+  .summary .attn b { color: var(--warn); }
+  h2 { font-size: 17px; margin: 40px 0 12px; }
+  h2 .n { color: var(--dim); font-weight: 400; margin-left: 6px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
+  .card.urgent { border-color: var(--bad); }
+  .card.done { background: transparent; }
+  .row { display: flex; gap: 6px 12px; align-items: center; flex-wrap: wrap; }
+  .state { font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+  .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .state.open { color: var(--warn); } .state.resumed { color: var(--ok); }
+  .state.outcome_unknown, .state.resuming { color: var(--accent); }
+  .state.expired, .state.superseded { color: var(--bad); }
+  .meta { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+  .timer { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--dim);
+           padding: 2px 10px; border-radius: 999px; background: var(--soft); }
+  .timer.soon { color: var(--warn); background: var(--warn-soft); }
+  .timer.now, .timer.ended { color: var(--bad); background: var(--bad-soft); }
+  .ask { font-size: 18px; line-height: 1.45; font-weight: 500; margin: 12px 0 6px; white-space: pre-wrap; max-width: 68ch; }
+  .card.done .ask { font-size: 16px; font-weight: 400; color: var(--dim); }
+  .task { color: var(--dim); font-size: 14px; margin: 0; }
+  .task b { color: var(--text); font-weight: 600; }
+  details { margin: 10px 0 0; } summary { cursor: pointer; color: var(--dim); font-size: 13px; width: fit-content; }
+  ol.steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--dim); }
+  ol.steps code { font-size: 12px; color: var(--text); }
+  .reply { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; transition: background-color .15s, border-color .15s; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  @media (prefers-color-scheme: dark) { button.primary { color: #0d1a33; } }
+  button:disabled { opacity: .5; cursor: default; }
+  :is(button, textarea, input, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  textarea { width: 100%; min-height: 60px; font: inherit; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
+             background: var(--bg); color: var(--text); resize: vertical; display: block; }
+  textarea::placeholder, input::placeholder { color: var(--dim); }
+  label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--dim); margin-top: 8px; }
+  label.check input { margin: 3px 0 0; }
+  .live { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 10;
+          display: grid; place-items: center; background: var(--soft); }
+  .live iframe { width: 100%; height: 100%; border: 0; }
+  .result { margin-top: 8px; font-size: 14px; } .result.bad { color: var(--bad); }
+  .receipt { margin-top: 12px; font-size: 14px; display: grid; gap: 2px; }
+  .empty { color: var(--dim); margin: 0; padding: 20px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: baseline; }
+  th { color: var(--dim); font-weight: 500; font-size: 13px; }
+  td.status { white-space: nowrap; font-weight: 600; }
+  td.time { white-space: nowrap; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .s-needs_attention { color: var(--warn); } .s-running { color: var(--accent); } .s-completed { color: var(--ok); }
+  .s-failed, .s-expired { color: var(--bad); }
+  .cause { display: block; color: var(--dim); font-size: 13px; }
+  @media (max-width: 600px) {
+    main { padding-top: 24px; }
+    .ask { font-size: 17px; }
+    .timer { margin-left: 0; }
+    table, tbody, tr, td { display: block; } tr.head { display: none; }
+    tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    td { border: 0; padding: 0; }
+    td.status, td.time { display: inline; margin-right: 10px; }
+  }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ok);
+         background: var(--ok-soft); padding: 2px 10px; border-radius: 999px; margin-top: 8px; }
+  .carry { font-size: 14px; margin: 12px 0 0; color: var(--text); }
+  .carry b { color: var(--ok); }
+  .proof { color: var(--ok); font-weight: 600; }
+  .story { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
+  .story h3 { font-size: 18px; letter-spacing: -.01em; margin: 0 0 2px; }
+  .story h3 em { font-style: normal; color: var(--ok); }
+  ol.timeline { list-style: none; margin: 14px 0 0; padding: 0; }
+  ol.timeline li { position: relative; padding: 0 0 14px 24px; }
+  ol.timeline li:last-child { padding-bottom: 0; }
+  ol.timeline li::before { content: ""; position: absolute; left: 4px; top: 7px; width: 10px; height: 10px; border-radius: 50%;
+                           background: var(--card); border: 2px solid var(--dim); box-sizing: border-box; }
+  ol.timeline li:not(:last-child)::after { content: ""; position: absolute; left: 8px; top: 19px; bottom: 2px; width: 2px; background: var(--line); }
+  ol.timeline li.helped::before { border-color: var(--warn); background: var(--warn); }
+  ol.timeline li.free::before { border-color: var(--ok); background: var(--ok); }
+  ol.timeline .what { font-weight: 600; }
+  form.track { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; }
+  form.track input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+</style>
+</head>
+<body>
+<div class="sim-bar" id="sim" hidden>Simulated runs. Nothing on this page reaches Browserbase.</div>
+<main>
+  <header>
+    <h1>Agent inbox</h1>
+    <p class="lede">Browserbase Agents runs that paused for a person.</p>
+    <ul class="summary" id="counts"></ul>
+  </header>
+
+  <h2>Pauses<span class="n" id="open-n"></span></h2>
+  <div id="pauses"><p class="empty">Loading…</p></div>
+
+  <section id="logins-section" hidden>
+    <h2>Saved logins</h2>
+    <div id="logins"></div>
+  </section>
+
+  <h2>All runs</h2>
+  <div id="runs"></div>
+  <form class="track" id="track">
+    <input id="track-id" placeholder="Track a run by id" aria-label="Run id">
+    <button type="submit">Track</button>
+  </form>
+</main>
+<script>
+  var BUCKETS = [["needs_attention", "Waiting"], ["running", "Running"], ["completed", "Completed"], ["failed", "Failed"], ["expired", "Expired"]];
+  var pausesEl = document.getElementById("pauses");
+  var rendered = {};
+  var clockOffset = 0;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : ""; }
+  // The browser session's time left, and how urgent it is: under 10 min "soon", under 2 min "now".
+  function remaining(ms) {
+    var left = Math.round((ms - (Date.now() + clockOffset)) / 1000);
+    if (left <= 0) return { text: "Browser session ended", level: "ended" };
+    var m = Math.floor(left / 60), s = left % 60;
+    return { text: "Browser ends in " + m + ":" + (s < 10 ? "0" : "") + s, level: left < 120 ? "now" : left < 600 ? "soon" : "" };
+  }
+  function tick(timer) {
+    var r = remaining(Number(timer.dataset.expires));
+    timer.textContent = r.text;
+    timer.className = "timer " + r.level;
+    var c = timer.closest(".card");
+    if (c) c.classList.toggle("urgent", c.dataset.open === "1" && (r.level === "now" || r.level === "ended"));
+  }
+
+  // One idempotency key per attempt at a pause, kept across refreshes: a resend
+  // after a lost response or a double-click is the same attempt, not a new one.
+  function keyFor(p) {
+    var k = "reply:" + p.id + ":" + p.attempts + ":" + (p.state === "open" ? "next" : "sent");
+    var name = "reply:" + p.id + ":" + p.attempts;
+    var v = null;
+    try { v = sessionStorage.getItem(name); } catch (e) {}
+    if (!v) { v = crypto.randomUUID(); try { sessionStorage.setItem(name, v); } catch (e) {} }
+    return v;
+  }
+
+  function post(path, body) {
+    return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); });
+  }
+
+  function send(p, payload, buttons, result) {
+    buttons.forEach(function (b) { b.disabled = true; });
+    result.className = "result"; result.textContent = "Sending…";
+    payload.key = keyFor(p);
+    var tries = 0;
+    (function attempt() {
+      tries += 1;
+      post("/api/interventions/" + encodeURIComponent(p.id) + "/reply", payload).then(function (res) {
+        if (res.status === 200) { result.textContent = ""; refresh(); return; }
+        result.className = "result bad"; result.textContent = res.body.message || res.body.error;
+        buttons.forEach(function (b) { b.disabled = false; });
+      }).catch(function () {
+        // No answer from the inbox. Resending with the same key is safe: it is
+        // recognised as this attempt, and no second resume is sent.
+        if (tries < 3) { setTimeout(attempt, 800 * tries); return; }
+        result.className = "result bad"; result.textContent = "The inbox did not answer. Clicking again resends the same reply safely.";
+        buttons.forEach(function (b) { b.disabled = false; });
+      });
+    })();
+  }
+
+  var STATE_TEXT = {
+    open: "Waiting for you",
+    resuming: "Sending your reply",
+    outcome_unknown: "Checking",
+    resumed: "Agent continued",
+    superseded: "Moved on",
+    expired: "Expired"
+  };
+  var RECEIPT_TEXT = {
+    accepted: "Browserbase accepted the reply and the run is running again.",
+    reply_seen: "The run's transcript shows your reply as the answer to this pause.",
+    moved_past: "The run moved past this pause. Its transcript did not show whose reply it received."
+  };
+
+  function card(p) {
+    var open = p.state === "open";
+    var c = el("section", "card" + (open ? "" : " done"));
+    c.dataset.open = open ? "1" : "0";
+    var head = el("div", "row");
+    head.appendChild(el("span", "state " + p.state, STATE_TEXT[p.state] || p.state));
+    head.appendChild(el("span", "meta", "run " + p.runId.slice(0, 8) + " · paused " + clock(p.pausedAt)));
+    if (p.sessionExpiresAt && (open || p.state === "outcome_unknown")) {
+      var t = el("span", "timer");
+      t.dataset.expires = String(p.sessionExpiresAt);
+      head.appendChild(t);
+      tick(t);
+    }
+    c.appendChild(head);
+    c.appendChild(el("p", "ask", p.message));
+    var task = el("p", "task", "Task: ");
+    task.appendChild(el("b", null, p.task || "(not loaded yet)"));
+    c.appendChild(task);
+    if (p.contextId && open) c.appendChild(el("span", "tag", "Saved login · " + p.contextId.slice(0, 8)));
+
+    if (p.steps && p.steps.length) {
+      var d = el("details");
+      d.appendChild(el("summary", null, "What the agent did before pausing (" + p.steps.length + ")"));
+      var ol = el("ol", "steps");
+      p.steps.forEach(function (s) {
+        var li = el("li");
+        if (s.kind === "tool-call") { li.appendChild(el("code", null, s.toolName)); li.appendChild(document.createTextNode(" " + s.text)); }
+        else li.textContent = s.text;
+        ol.appendChild(li);
+      });
+      d.appendChild(ol);
+      c.appendChild(d);
+    }
+
+    if (p.state === "open") c.appendChild(actions(p));
+    else c.appendChild(receipt(p));
+    return c;
+  }
+
+  function actions(p) {
+    var box = el("div", "reply");
+    if (p.detail) box.appendChild(el("div", "result bad", p.detail));
+    var answer = el("textarea"); answer.placeholder = "Answer the agent"; answer.setAttribute("aria-label", "Answer the agent");
+    var secretLabel = el("label", "check");
+    var secret = el("input"); secret.type = "checkbox";
+    secretLabel.appendChild(secret);
+    secretLabel.appendChild(document.createTextNode("This is a secret (a code or password): send it as a variable and don't store it"));
+    var row = el("div", "actions");
+    var sendBtn = el("button", "primary", "Send answer");
+    var takeBtn = el("button", null, p.controller === "human" ? "Browser open — continue below" : "Take over the browser");
+    row.appendChild(sendBtn);
+    if (p.hasBrowser) row.appendChild(takeBtn);
+    else row.appendChild(el("span", "meta", "No browser to take over: this run has not opened one."));
+    var result = el("div", "result");
+    box.appendChild(answer); box.appendChild(secretLabel); box.appendChild(row); box.appendChild(result);
+
+    var takeoverArea = el("div");
+    box.appendChild(takeoverArea);
+
+    sendBtn.onclick = function () {
+      if (!answer.value.trim()) { result.className = "result bad"; result.textContent = "Write an answer first."; return; }
+      send(p, { type: "answer", text: answer.value, secret: secret.checked }, [sendBtn, takeBtn], result);
+    };
+    function openBrowser() {
+      takeBtn.disabled = true;
+      post("/api/interventions/" + encodeURIComponent(p.id) + "/takeover").then(function () {
+        return fetch("/api/interventions/" + encodeURIComponent(p.id) + "/live").then(function (r) { return r.json(); });
+      }).then(function (live) {
+        takeoverArea.textContent = "";
+        var frameBox = el("div", "live");
+        if (live.url) {
+          var f = document.createElement("iframe");
+          f.src = live.url;
+          f.setAttribute("sandbox", "allow-same-origin allow-scripts allow-forms");
+          f.setAttribute("allow", "clipboard-read; clipboard-write");
+          f.setAttribute("referrerpolicy", "no-referrer");
+          frameBox.appendChild(f);
+        } else frameBox.appendChild(el("p", "meta", "Live View is not available for this session."));
+        if (p.contextId) {
+          var carry = el("p", "carry");
+          carry.appendChild(document.createTextNode("This run uses saved login " + p.contextId.slice(0, 8) + ". "));
+          carry.appendChild(el("b", null, "If you sign in here, later runs with this saved login can start signed in."));
+          takeoverArea.appendChild(carry);
+        }
+        takeoverArea.appendChild(frameBox);
+        var note = el("textarea"); note.setAttribute("aria-label", "What you did"); note.placeholder = "What you did (optional — never type codes or passwords here)";
+        var back = el("button", "primary", "Hand back to agent");
+        var backRow = el("div", "actions"); backRow.appendChild(back);
+        takeoverArea.appendChild(note); takeoverArea.appendChild(backRow);
+        back.onclick = function () { send(p, { type: "takeover", note: note.value || null }, [back, sendBtn], result); };
+      });
+    }
+    takeBtn.onclick = openBrowser;
+    if (p.controller === "human" && p.hasBrowser) openBrowser();
+    return box;
+  }
+
+  function receipt(p) {
+    var r = el("div", "receipt");
+    if (p.resolution) {
+      var what = p.resolution.type === "takeover" ? "You took over and handed back" : "You answered";
+      r.appendChild(el("div", null, what + (p.resolution.summary ? ": " + p.resolution.summary : "")));
+      if (p.resolution.page) r.appendChild(el("div", "meta", "Left the browser on: " + p.resolution.page.title + " — " + p.resolution.page.url));
+    }
+    if (p.state === "resuming") r.appendChild(el("div", "meta", "Sending to Browserbase…"));
+    if (p.state === "outcome_unknown") r.appendChild(el("div", "meta",
+      "Browserbase did not confirm the reply (" + (p.detail || "no answer") + "). Checking the run to see whether the agent received it. It will not be resent."));
+    if (p.state === "resumed") r.appendChild(el("div", "meta", (RECEIPT_TEXT[p.receipt] || "") + " " + clock(p.resolvedAt)));
+    if (p.after && p.resolution) {
+      var took = p.resolution.type === "takeover";
+      if (p.after.steps.length) r.appendChild(el("div", "meta", "Then the agent: " + p.after.steps.join(" → ")));
+      if (!p.after.typed && took) r.appendChild(el("div", "proof", "The agent typed nothing into the page after you handed back, so any sign-in was yours."));
+      if (p.after.typed) r.appendChild(el("div", "meta", "The agent typed into the page itself after your " + (took ? "hand-back." : "reply.")));
+    }
+    if (p.state === "superseded") r.appendChild(el("div", "meta", p.detail || "The run moved on without this reply."));
+    if (p.state === "expired") {
+      r.appendChild(el("div", "meta", p.detail || "The browser session ended."));
+      r.appendChild(el("div", "meta", "Recovery: this run cannot continue. Start a new run with the same task" +
+        (p.resolution && p.resolution.type === "answer" ? " and include the answer above." : " and reply sooner; the session limit counts from when the run started.")));
+    }
+    return r;
+  }
+
+  function signature(p) {
+    return [p.state, p.receipt, p.controller, p.detail, p.attempts, p.task ? 1 : 0, p.contextId,
+            p.after ? p.after.steps.length + ":" + p.after.typed : ""].join("|");
+  }
+
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  // One story per Context: who helped, then which later runs finished without asking.
+  function renderLogins(stories) {
+    var box = document.getElementById("logins"); box.textContent = "";
+    document.getElementById("logins-section").hidden = !stories.length;
+    stories.forEach(function (st) {
+      var c = el("section", "story");
+      var h = el("h3");
+      if (st.helps) {
+        h.appendChild(document.createTextNode("You helped " + (st.helps === 1 ? "once" : st.helps + " times") + ". "));
+        h.appendChild(el("em", null, st.laterWithoutHelp ? plural(st.laterWithoutHelp, "later run", "later runs") + " didn't need you." : "No later run yet."));
+      } else h.textContent = plural(st.runs.length, "run uses", "runs use") + " this saved login.";
+      c.appendChild(h);
+      c.appendChild(el("div", "meta", "Saved login " + st.contextId.slice(0, 8) + " · a Browserbase Context shared by these runs"));
+      var ol = el("ol", "timeline");
+      var firstHelp = null;
+      st.runs.forEach(function (run) {
+        if (run.helpedAt && firstHelp === null) firstHelp = run.helpedAt;
+        var free = firstHelp !== null && !run.helped && run.pauses === 0 && run.status === "COMPLETED" && run.createdAt > firstHelp;
+        var li = el("li", run.helped ? "helped" : free ? "free" : "");
+        var what = run.helped === "takeover" ? "Paused for you. You took over and handed back."
+          : run.helped === "answer" ? "Paused for you. You answered."
+          : run.pauses ? "Paused, waiting for you."
+          : run.status === "COMPLETED" ? "Finished without asking you."
+          : run.status === "RUNNING" || run.status === "PENDING" ? "Running." : (run.status || "Loading").toLowerCase() + ".";
+        li.appendChild(el("div", "what", what));
+        li.appendChild(el("div", "meta", "Run " + run.runId.slice(0, 8) + " · started " + clock(run.createdAt) + " · " + run.task));
+        ol.appendChild(li);
+      });
+      c.appendChild(ol);
+      box.appendChild(c);
+    });
+  }
+
+  function refresh() {
+    fetch("/api/state").then(function (r) { return r.json(); }).then(function (s) {
+      clockOffset = s.now - Date.now();
+      document.getElementById("sim").hidden = !s.simulated;
+
+      var counts = document.getElementById("counts"); counts.textContent = "";
+      BUCKETS.forEach(function (b) {
+        var n = s.runs.filter(function (r) { return r.bucket === b[0]; }).length;
+        var li = el("li", !n ? "zero" : b[0] === "needs_attention" ? "attn" : "");
+        li.appendChild(el("b", null, String(n))); li.appendChild(document.createTextNode(b[1].toLowerCase()));
+        counts.appendChild(li);
+      });
+      var waiting = s.interventions.filter(function (p) { return p.state === "open"; }).length;
+      document.getElementById("open-n").textContent = s.interventions.length ? waiting + " waiting for you" : "";
+
+      if (!s.interventions.length) { pausesEl.innerHTML = '<p class="empty">No run has paused yet.</p>'; rendered = {}; }
+      else {
+        var empty = pausesEl.querySelector(".empty"); if (empty) empty.remove();
+        var seen = {};
+        s.interventions.forEach(function (p, i) {
+          seen[p.id] = true;
+          var had = rendered[p.id];
+          if (!had || had.sig !== signature(p)) {
+            var node = card(p);
+            if (had) pausesEl.replaceChild(node, had.node); else pausesEl.appendChild(node);
+            rendered[p.id] = { node: node, sig: signature(p) };
+          }
+          if (pausesEl.children[i] !== rendered[p.id].node) pausesEl.insertBefore(rendered[p.id].node, pausesEl.children[i] || null);
+        });
+        Object.keys(rendered).forEach(function (id) { if (!seen[id]) { rendered[id].node.remove(); delete rendered[id]; } });
+      }
+
+      renderLogins(s.savedLogins || []);
+
+      var runsEl = document.getElementById("runs"); runsEl.textContent = "";
+      if (!s.runs.length) { runsEl.appendChild(el("p", "empty", "No runs tracked yet.")); return; }
+      var table = el("table"); var head = el("tr", "head");
+      ["Task", "Status", "Started"].forEach(function (h) { head.appendChild(el("th", null, h)); });
+      table.appendChild(head);
+      s.runs.forEach(function (r) {
+        var tr = el("tr");
+        var task = el("td", null, r.task || r.runId);
+        if (r.cause) task.appendChild(el("span", "cause", r.cause));
+        tr.appendChild(task);
+        var label = (BUCKETS.find(function (b) { return b[0] === r.bucket; }) || [0, r.status])[1];
+        var status = el("td", "status s-" + r.bucket, label);
+        status.title = r.status;
+        tr.appendChild(status);
+        tr.appendChild(el("td", "time", clock(r.createdAt)));
+        table.appendChild(tr);
+      });
+      runsEl.appendChild(table);
+    }).catch(function () {});
+  }
+
+  document.getElementById("track").onsubmit = function (e) {
+    e.preventDefault();
+    var id = document.getElementById("track-id").value.trim();
+    if (id) post("/api/runs", { runId: id }).then(refresh);
+  };
+  setInterval(function () {
+    document.querySelectorAll(".timer").forEach(tick);
+  }, 1000);
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

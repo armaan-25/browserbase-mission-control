@@ -3,3 +3,8 @@ node_modules/
 
 # Playwright's own recording output, when filming the site.
 videos/
+.env
+handoff.db*
+inbox.db*
+inbox-demo.db*
+inbox-remember.db*

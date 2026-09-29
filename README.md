@@ -1,4 +1,24 @@
-# Browser write lease
+# Agent inbox for Browserbase Agents
+
+Browserbase Agents can now pause for a person (`pauseWhen`, shipped 2026-09-24),
+but a paused run is only an API state: nothing tells anyone, shows them what the
+agent needs, or delivers their reply safely. `inbox/` is that missing half: an
+inbox of paused runs where a person answers or takes over the live browser. Each
+reply becomes at most one `/resume` call, and when Browserbase's answer is lost
+the inbox checks the run instead of sending again. (Exactly-once delivery would
+need Browserbase to accept a pause id on `/resume`; see `ARCHITECTURE.md`.)
+
+```bash
+npm run inbox:demo    # SIMULATED runs, free: http://127.0.0.1:4821
+npm run inbox         # real Browserbase runs (BROWSERBASE_API_KEY in .env)
+npm test
+```
+
+Design, guarantees and limits: `ARCHITECTURE.md`. Concepts: `LEARNING.md`.
+
+The rest of this README is the earlier project this grew from.
+
+## Browser write lease
 
 Two CDP clients on one browser page. One destroys the other's work, silently.
 This is that collision reproduced, and a small coordination layer that stops it.
@@ -52,6 +72,18 @@ Chrome and needs `BROWSERBASE_API_KEY` in the environment.
 | `record.ts` | Capture front-end: films the scenario into `site/frames.json`. |
 | `site/` | Static page replaying a real recorded run. Two files, no server. |
 | `browser-write-lease-16x9.mp4` | 14s recording of that page. |
+
+## Human handoff
+
+`handoff/` extends the same idea to a person: a Stagehand v4 loop asks for help,
+gives up the browser, and gets it back with a fresh look at the page. Design and
+guarantees are in `ARCHITECTURE.md`; concepts in `LEARNING.md`.
+
+```bash
+npm test                  # all tests: inbox, handoff, and real-Stagehand local
+npm run handoff:serve     # the inbox on http://127.0.0.1:4820
+npm run handoff:local     # the example loop in a local Chrome window (free)
+```
 
 `demo.ts` and `record.ts` are thin: they choose how progress is reported and
 nothing else. Anything a viewer could disagree about lives in `scenario.ts`, so

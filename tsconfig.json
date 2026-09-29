@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "handoff/**/*.ts", "inbox/**/*.ts", "examples/**/*.ts", "test/**/*.ts"]
 }
