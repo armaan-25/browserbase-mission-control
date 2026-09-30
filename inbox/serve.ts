@@ -9,6 +9,7 @@
  * and keeps tracking them. It creates nothing and resumes nothing on its own.
  */
 import { agentsApi, BROWSERBASE_API } from "./api.ts";
+import { keychainCredentials } from "./credentials.ts";
 import { startInboxServer } from "./server.ts";
 import { openStore } from "./store.ts";
 import { createSync } from "./sync.ts";
@@ -27,6 +28,7 @@ sync.recover();
 void sync.backfillContexts();
 
 const inbox = await startInboxServer({
+  credentials: keychainCredentials(),
   store,
   api,
   sync,
@@ -40,8 +42,7 @@ console.log(baseUrl === BROWSERBASE_API ? "watching Browserbase Agents runs" : `
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    sync.stop();
-    void inbox.close().finally(() => {
+    void Promise.all([sync.stop(), inbox.close()]).finally(() => {
       store.close();
       process.exit(0);
     });

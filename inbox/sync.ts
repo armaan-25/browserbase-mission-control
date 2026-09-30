@@ -32,6 +32,8 @@ export interface SyncOptions {
   /** How long an uncertain resume may still show the same pause before the card reopens. */
   readonly graceMs?: number;
   readonly now?: () => number;
+  /** How many runs are read from Browserbase at once in a tick (default 6). */
+  readonly concurrency?: number;
   /** Called after anything changed, so the page can refresh. */
   readonly onChange?: () => void;
 }
@@ -44,7 +46,8 @@ export interface Sync {
   /** Read the session of each run whose Context is not recorded (finished before this was tracked). Reads only. */
   backfillContexts(): Promise<void>;
   start(intervalMs: number): void;
-  stop(): void;
+  /** Stops polling; resolves once a check already in progress has finished, so the store can be closed. */
+  stop(): Promise<void>;
 }
 
 /** The pause request text from a stored tool-call payload (`{"message": ...}`). */
@@ -88,6 +91,7 @@ export function createSync(options: SyncOptions): Sync {
   const inFlight = new Map<string, Promise<void>>();
   let timer: ReturnType<typeof setInterval> | null = null;
   let ticking = false;
+  let current: Promise<void> = Promise.resolve();
 
   async function readAndReconcile(runId: string): Promise<void> {
     const observedAt = now();
@@ -166,12 +170,20 @@ export function createSync(options: SyncOptions): Sync {
     const settled = next.finally(() => {
       if (inFlight.get(runId) === settled) inFlight.delete(runId);
     });
+    // The caller gets the failure through `next`; this copy must not become an
+    // unhandled rejection, which would stop the whole process on one timed-out read.
+    settled.catch(() => {});
     inFlight.set(runId, settled);
     return next;
   }
 
-  async function tick(): Promise<void> {
-    if (ticking) return;
+  function tick(): Promise<void> {
+    if (ticking) return current;
+    current = runTick();
+    return current;
+  }
+
+  async function runTick(): Promise<void> {
     ticking = true;
     try {
       if (options.discover) {
@@ -183,17 +195,27 @@ export function createSync(options: SyncOptions): Sync {
           console.error(`inbox: could not list runs: ${error instanceof Error ? error.message : "unknown error"}`);
         }
       }
-      for (const run of store.listRuns()) {
-        if (run.missing) continue;
+      const due = store.listRuns().filter((run) => {
+        if (run.missing) return false;
         const unresolved = store.interventionsForRun(run.runId).some((i) => UNRESOLVED.has(i.state));
-        if (run.status !== null && TERMINAL.has(run.status) && !unresolved) continue;
-        try {
-          await syncRun(run.runId);
-        } catch (error) {
-          // A failed read changes nothing; the next tick tries again.
-          console.error(`inbox: could not sync run ${run.runId}: ${error instanceof Error ? error.message : "unknown error"}`);
+        return !(run.status !== null && TERMINAL.has(run.status) && !unresolved);
+      });
+      // Several runs at once, so a tick with many live runs does not take minutes. Each
+      // run's own syncs still never overlap (syncRun queues them).
+      let next = 0;
+      const worker = async () => {
+        while (next < due.length) {
+          const run = due[next++];
+          if (!run) return;
+          try {
+            await syncRun(run.runId);
+          } catch (error) {
+            // A failed read changes nothing; the next tick tries again.
+            console.error(`inbox: could not sync run ${run.runId}: ${error instanceof Error ? error.message : "unknown error"}`);
+          }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(options.concurrency ?? 6, due.length) }, worker));
     } finally {
       ticking = false;
     }
@@ -229,6 +251,7 @@ export function createSync(options: SyncOptions): Sync {
     stop() {
       if (timer) clearInterval(timer);
       timer = null;
+      return current.catch(() => {});
     },
   };
 }

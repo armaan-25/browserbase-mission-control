@@ -5,6 +5,7 @@
  *   GET  /api/state                         runs by bucket, every pause with its context, saved-login stories
  *   GET  /api/runs/:runId/timeline          the run's event log (the receipt)
  *   POST /api/runs                          track a run by id  { runId }
+ *   GET  /api/runs/:runId/live              Live View URL while the run's browser is alive (the page shows it view-only)
  *   GET  /api/interventions/:id/live        Live View URL and open tabs, only while the pause is open
  *   POST /api/interventions/:id/takeover    record that a person opened the browser
  *   POST /api/interventions/:id/reply       answer or hand back  { key, type, text?, secret?, note? }
@@ -16,7 +17,8 @@
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AgentsApi } from "./api.ts";
-import { afterReply, savedLogins } from "./evidence.ts";
+import { matchLogin, type CredentialStore } from "./credentials.ts";
+import { afterReply, metrics, savedLogins, skippedLogin } from "./evidence.ts";
 import { TERMINAL, type Intervention } from "./intervention.ts";
 import { resolvePause, startTakeover, type ReplyInput, type ResolveOutcome } from "./resolve.ts";
 import type { StoredRun, Store } from "./store.ts";
@@ -34,8 +36,12 @@ export interface InboxServerOptions {
   readonly sync: Sync;
   /** True when `api` is not the real Browserbase: every run is labelled SIMULATED. */
   readonly simulated: boolean;
+  /** How a simulated inbox says so: a full-width banner (default), a small header tag, or nothing (recordings only). */
+  readonly simulatedLabel?: "banner" | "tag" | "none";
   readonly port?: number;
   readonly now?: () => number;
+  /** Saved logins a person can send to a stuck agent (as variables, never stored). */
+  readonly credentials?: CredentialStore;
 }
 
 export interface RunningInbox {
@@ -57,7 +63,10 @@ class HttpError extends Error {
 const UNRESOLVED = new Set(["open", "resuming", "outcome_unknown"]);
 
 export function bucketOf(run: StoredRun, pauses: readonly Intervention[]): Bucket {
-  if (run.status === "PAUSED" || pauses.some((p) => UNRESOLVED.has(p.state))) return "needs_attention";
+  if (pauses.some((p) => UNRESOLVED.has(p.state))) return "needs_attention";
+  // Live (2026-09-29): a paused run whose browser has ended still says PAUSED. Once its
+  // pause card has expired, nobody can help it, so it is not "waiting".
+  if (run.status === "PAUSED") return pauses.some((p) => p.state === "expired") ? "expired" : "needs_attention";
   if (run.status === null) return "unknown";
   if (run.status === "COMPLETED") return "completed";
   if (run.status === "TIMED_OUT") return "expired";
@@ -97,7 +106,11 @@ function parseReply(body: Record<string, unknown>): ReplyInput {
   if (body.type === "takeover") {
     return { key, type: "takeover", note: typeof body.note === "string" ? body.note : null };
   }
-  throw new HttpError(400, "bad_field", "type must be answer or takeover");
+  if (body.type === "credentials") {
+    if (typeof body.site !== "string" || !body.site) throw new HttpError(400, "bad_field", "site is required");
+    return { key, type: "credentials", site: body.site };
+  }
+  throw new HttpError(400, "bad_field", "type must be answer, takeover or credentials");
 }
 
 function outcome(res: ServerResponse, result: ResolveOutcome): void {
@@ -109,12 +122,21 @@ function outcome(res: ServerResponse, result: ResolveOutcome): void {
 export async function startInboxServer(options: InboxServerOptions): Promise<RunningInbox> {
   const { store, api, sync } = options;
   const now = options.now ?? Date.now;
-  const deps = { store, api, now };
+  const deps = { store, api, now, credentials: options.credentials };
   let port = 0;
+
+  /** The run's browser session can still be shown: it has one, and it has not ended. */
+  function browserAlive(run: StoredRun): boolean {
+    if (!run.sessionId || run.missing) return false;
+    if (run.status !== null && TERMINAL.has(run.status)) return false;
+    if (run.sessionStatus !== null && run.sessionStatus !== "RUNNING") return false;
+    return run.sessionExpiresAt === null || run.sessionExpiresAt > now();
+  }
 
   function state() {
     const runs = store.listRuns();
-    const pausesByRun = new Map(runs.map((r) => [r.runId, store.interventionsForRun(r.runId)]));
+    const pausesByRun = store.interventionsByRun();
+    const stepCounts = store.stepCounts();
     const byId = new Map(runs.map((r) => [r.runId, r]));
     // Cards waiting for a person first, soonest-expiring browser first; then the rest.
     const expiry = (p: Intervention) => byId.get(p.runId)?.sessionExpiresAt ?? Number.MAX_SAFE_INTEGER;
@@ -123,10 +145,21 @@ export async function startInboxServer(options: InboxServerOptions): Promise<Run
       ...all.filter((p) => p.state === "open").sort((a, b) => expiry(a) - expiry(b)),
       ...all.filter((p) => p.state !== "open"),
     ];
+    const stories = savedLogins(runs, (runId) => pausesByRun.get(runId) ?? []);
+    const saved = options.credentials?.list() ?? [];
+    const skipped = skippedLogin(stories);
     return {
       simulated: options.simulated,
+      simulatedLabel: options.simulatedLabel ?? "banner",
       now: now(),
       runs: runs.map((run) => ({
+        // For the wall: how far the agent has got, whether its browser can be shown, and
+        // the pause (if any) waiting on a person.
+        steps: stepCounts.get(run.runId) ?? 0,
+        live: browserAlive(run),
+        openPauseId: (pausesByRun.get(run.runId) ?? []).find((p) => p.state === "open")?.id ?? null,
+        contextId: run.contextId,
+        skippedLogin: skipped.has(run.runId),
         runId: run.runId,
         task: run.task,
         status: run.missing ? "NOT FOUND" : (run.status ?? "loading"),
@@ -156,12 +189,15 @@ export async function startInboxServer(options: InboxServerOptions): Promise<Run
           // HTTP strategy): then there is nothing to take over.
           hasBrowser: Boolean(run?.sessionId),
           contextId: run?.contextId ?? null,
+          // The saved login for the site this agent is stuck on, if any (site and username only).
+          savedLogin: pause.state === "open" ? matchLogin(saved, [pause.message, run?.task ?? "", ...steps.map((s) => s.text)]) : null,
           steps,
           // What the agent did once it had the reply; null until the reply is in its transcript.
-          after: pause.state === "open" ? null : afterReply(store.recentParts(pause.runId, 200), pause.pauseCallId),
+          after: pause.state === "open" ? null : afterReply(store.partsFromPauseResult(pause.runId, pause.pauseCallId, 60), pause.pauseCallId),
         };
       }),
-      savedLogins: savedLogins(runs, (runId) => pausesByRun.get(runId) ?? []),
+      savedLogins: stories,
+      metrics: metrics(runs, (runId) => pausesByRun.get(runId) ?? [], now()),
     };
   }
 
@@ -196,6 +232,13 @@ export async function startInboxServer(options: InboxServerOptions): Promise<Run
         store.trackRun(body.runId, now());
         await sync.syncRun(body.runId).catch(() => {});
         return send(res, 200, { run: store.getRun(body.runId) });
+      }
+      if (method === "GET" && parts[3] === "live" && parts[2]) {
+        // A Live View URL controls a live browser. It is served only while the browser is
+        // alive, never stored, and the wall shows it view-only until a person takes over.
+        const run = store.getRun(parts[2]);
+        if (!run || !browserAlive(run) || !run.sessionId) return send(res, 200, { url: null, pages: [] });
+        return send(res, 200, (await api.liveView(run.sessionId)) ?? { url: null, pages: [] });
       }
       if (method === "GET" && parts[3] === "timeline" && parts[2]) {
         return send(res, 200, { events: store.events(parts[2]) });

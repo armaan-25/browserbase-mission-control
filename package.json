@@ -12,7 +12,9 @@
     "test": "node --test --test-concurrency=1 test/*.test.ts",
     "inbox": "node --env-file-if-exists=.env inbox/serve.ts",
     "inbox:demo": "node inbox/demo.ts",
-    "inbox:remember": "node inbox/demo-remember.ts"
+    "inbox:remember": "node inbox/demo-remember.ts",
+    "login:add": "node inbox/credentials.ts",
+    "inbox:loom": "node inbox/demo-loom.ts"
   },
   "dependencies": {
     "playwright": "^1.62.1"

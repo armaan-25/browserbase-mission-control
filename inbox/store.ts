@@ -61,6 +61,10 @@ const SCHEMA = `
     at INTEGER NOT NULL,
     detail TEXT
   );
+  -- Every per-run read filters on run_id; messages are also read in time order.
+  CREATE INDEX IF NOT EXISTS messages_run_time ON messages (run_id, created_at);
+  CREATE INDEX IF NOT EXISTS interventions_run ON interventions (run_id);
+  CREATE INDEX IF NOT EXISTS events_run ON events (run_id);
 `;
 
 export interface StoredRun {
@@ -244,6 +248,44 @@ export function openStore(path: string) {
           insert.run(runId, message.id, seq, message.createdAt, message.role, part.type, part.toolName, part.toolCallId, redact(body).slice(0, limit));
         });
       }
+    },
+
+    /** Tool calls per run, pauses excluded: how far each agent has got. One query for all runs. */
+    stepCounts(): Map<string, number> {
+      const rows = db
+        .prepare("SELECT run_id, count(*) AS n FROM messages WHERE kind = 'tool-call' AND (tool_name IS NULL OR tool_name != 'pause') GROUP BY run_id")
+        .all() as Row[];
+      return new Map(rows.map((r) => [String(r.run_id), Number(r.n)]));
+    },
+
+    /** Every pause, grouped by run. One query instead of one per run. */
+    interventionsByRun(): Map<string, Intervention[]> {
+      const byRun = new Map<string, Intervention[]>();
+      for (const row of db.prepare("SELECT run_id, body FROM interventions ORDER BY paused_at").all() as Row[]) {
+        const runId = String(row.run_id);
+        byRun.set(runId, [...(byRun.get(runId) ?? []), JSON.parse(String(row.body)) as Intervention]);
+      }
+      return byRun;
+    },
+
+    /** Message parts from a pause's result onward, oldest first; empty until the result exists. */
+    partsFromPauseResult(runId: string, pauseCallId: string, limit: number): StoredPart[] {
+      const start = db
+        .prepare("SELECT created_at FROM messages WHERE run_id = ? AND kind = 'tool-result' AND tool_call_id = ? LIMIT 1")
+        .get(runId, pauseCallId) as Row | undefined;
+      if (!start) return [];
+      const rows = db
+        .prepare("SELECT * FROM messages WHERE run_id = ? AND created_at >= ? ORDER BY created_at, id, seq LIMIT ?")
+        .all(runId, Number(start.created_at), limit) as Row[];
+      return rows.map((row) => ({
+        messageId: String(row.id),
+        createdAt: Number(row.created_at),
+        role: String(row.role),
+        kind: String(row.kind),
+        toolName: nullable(row.tool_name),
+        toolCallId: nullable(row.tool_call_id),
+        text: String(row.text),
+      }));
     },
 
     /** The last `limit` message parts of a run, oldest first. */

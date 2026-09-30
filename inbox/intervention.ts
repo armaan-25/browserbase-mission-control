@@ -44,7 +44,8 @@ export type InterventionState = "open" | "resuming" | "outcome_unknown" | "resum
 
 /** What the person sent, as recorded. Secret values are never part of this. */
 export interface Resolution {
-  readonly type: "answer" | "takeover";
+  /** `credentials`: a saved login was sent as variables (never stored). */
+  readonly type: "answer" | "takeover" | "credentials";
   /** Safe to show and store: redacted text, or a marker that a secret was supplied. */
   readonly summary: string;
   /** The exact `task` text sent to /resume. Secrets are `%placeholders%` in it. */

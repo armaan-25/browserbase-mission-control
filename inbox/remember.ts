@@ -39,7 +39,12 @@ export async function runTwiceWithContext(
     let run = started;
     while (!TERMINAL.has(run.status)) {
       await new Promise((resolve) => setTimeout(resolve, hooks.pollMs ?? 3_000));
-      run = (await api.getRun(started.runId)) ?? run;
+      try {
+        run = (await api.getRun(started.runId)) ?? run;
+      } catch (error) {
+        // A read changes nothing, so a failed one is just tried again next time.
+        log(`${label}: could not read the run (${error instanceof Error ? error.message : "unknown error"}), retrying`);
+      }
     }
     const { messages } = await api.listMessages(run.runId, null);
     const pauses = messages.flatMap((m) => m.parts).filter((p) => p.type === "tool-call" && p.toolName === "pause").length;
@@ -67,8 +72,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // agent-login-test/ (deployed at agent-login-test.vercel.app): a login that shows no
   // credentials, and an invoice code that exists only in the 1-day cookie a sign-in sets.
   // saucedemo.com failed as a test site: it prints its own login, and the agent used it.
+  // The agent may check a page with a plain HTTP request before opening a browser; if it
+  // pauses there, no browser (and so no saved login) is ever loaded (seen live, 2026-09-30).
+  // So the task and pause condition insist on the browser.
   await runTwiceWithContext(agentsApi({ apiKey, baseUrl: process.env.INBOX_API_BASE ?? BROWSERBASE_API }), {
-    task: "Open https://agent-login-test.vercel.app/account.html in the browser and report the latest invoice number shown there.",
-    pauseWhen: "you reach a login page, since you do not have the credentials; a person will sign in for you",
+    task: "Open https://agent-login-test.vercel.app/account.html in the browser (not with an HTTP request) and report the latest invoice number shown there.",
+    pauseWhen: "the page open in the browser shows a sign-in form and you do not have the credentials. Decide this by looking at the page in the browser, not from an HTTP request",
   });
 }

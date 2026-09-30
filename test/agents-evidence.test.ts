@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { afterReply, savedLogins } from "../inbox/evidence.ts";
+import { afterReply, metrics, savedLogins, skippedLogin } from "../inbox/evidence.ts";
 import type { Intervention } from "../inbox/intervention.ts";
 import type { StoredPart, StoredRun } from "../inbox/store.ts";
 
@@ -100,4 +100,31 @@ test("after a reply: stops at the next pause, and is null until the reply is in 
   ];
   assert.deepEqual(afterReply(parts, "p"), { steps: ["click"], typed: false });
   assert.equal(afterReply(parts.slice(0, 1), "p"), null);
+});
+
+test("metrics: waiting now, median time to help, missed, finished without a person, after a saved sign-in", () => {
+  const runs = [run("r1", 100, "ctx"), run("r2", 300, "ctx"), run("r3", 50, null), run("r4", 60, null, "PAUSED"), run("r5", 70, null, "PAUSED")];
+  const byRun: Record<string, Intervention[]> = {
+    r1: [helped("r1", 160, "takeover")], // paused at 150, helped at 160: 10 ms
+    r3: [{ ...helped("r3", 90, "answer"), pausedAt: 60 } as unknown as Intervention], // 30 ms
+    r4: [{ ...helped("r4", 0, "answer"), state: "open", resolution: null, resolvedAt: null, pausedAt: 400 } as unknown as Intervention],
+    r5: [{ ...helped("r5", 0, "answer"), state: "expired", resolution: null, resolvedAt: null, pausedAt: 80 } as unknown as Intervention],
+  };
+  const m = metrics(runs, (id) => byRun[id] ?? [], 1_000);
+  assert.deepEqual(m.waiting, { count: 1, oldestMs: 600 });
+  assert.deepEqual(m.timeToHelp, { medianMs: 20, count: 2 });
+  assert.equal(m.missed, 1);
+  assert.deepEqual(m.finishedWithoutPerson, { count: 1, of: 3 }, "r2 never paused; r1 and r3 needed someone");
+  assert.equal(m.afterSavedSignIn, 1, "r2 started after r1's help, with the same saved login, and never paused");
+});
+
+test("metrics: nothing yet gives nulls and zeros, not invented numbers", () => {
+  const m = metrics([], () => [], 1_000);
+  assert.deepEqual(m, { waiting: { count: 0, oldestMs: null }, timeToHelp: { medianMs: null, count: 0 }, missed: 0, finishedWithoutPerson: { count: 0, of: 0 }, afterSavedSignIn: 0 });
+});
+
+test("skipped login: only completed, pause-free runs started after the first help with that saved login", () => {
+  const runs = [run("before", 50, "ctx"), run("r1", 100, "ctx"), run("r2", 300, "ctx"), run("r3", 400, "ctx", "RUNNING"), run("other", 500, "other-ctx")];
+  const byRun: Record<string, Intervention[]> = { r1: [helped("r1", 160, "takeover")] };
+  assert.deepEqual([...skippedLogin(savedLogins(runs, (id) => byRun[id] ?? []))], ["r2"]);
 });

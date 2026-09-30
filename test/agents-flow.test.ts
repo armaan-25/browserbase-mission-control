@@ -7,10 +7,12 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { agentsApi } from "../inbox/api.ts";
+import { matchLogin, memoryCredentials } from "../inbox/credentials.ts";
 import { afterReply, savedLogins } from "../inbox/evidence.ts";
 import { startFakeBrowserbase, type Step } from "../inbox/fake-browserbase.ts";
 import type { Intervention } from "../inbox/intervention.ts";
 import { resolvePause, startTakeover } from "../inbox/resolve.ts";
+import { bucketOf } from "../inbox/server.ts";
 import { openStore } from "../inbox/store.ts";
 import { createSync } from "../inbox/sync.ts";
 import { eventually, must, tempDb } from "./fixtures.ts";
@@ -457,4 +459,105 @@ test("runs recorded before Contexts were tracked learn their Context once, from 
 
   await h.sync.backfillContexts();
   assert.equal(h.store.getRun(second)?.contextId, contextId);
+});
+
+test("a paused run whose browser has ended is expired, not waiting, though Browserbase still says PAUSED", async (t) => {
+  const h = await setup();
+  t.after(() => h.close());
+  const runId = h.fake.startRun({ task: "Get the invoice", pauseWhen: "verification", steps: TAKEOVER });
+  await h.openPause(runId);
+  h.fake.expireSession(runId);
+  await h.settle(runId, () => h.store.interventionsForRun(runId)[0]?.state === "expired");
+  const run = must(h.store.getRun(runId), "run");
+  assert.equal(run.status, "PAUSED", "as seen live: the run still reports PAUSED");
+  assert.equal(bucketOf(run, h.store.interventionsForRun(runId)), "expired");
+});
+
+test("at scale: 40 runs with network latency are all found, carded and counted, and a tick checks them in parallel", { timeout: 60_000 }, async (t) => {
+  const fake = await startFakeBrowserbase({ stepMs: 10, latencyMs: 40 });
+  const store = openStore(tempDb());
+  const api = agentsApi({ apiKey: "test", baseUrl: fake.url });
+  const sync = createSync({ store, api, discover: true, concurrency: 8 });
+  t.after(async () => {
+    await fake.close();
+    store.close();
+  });
+  const ids = Array.from({ length: 40 }, (_, i) =>
+    fake.startRun({ task: `task ${i}`, pauseWhen: "p", steps: i % 2 ? CLARIFY : [{ tool: "extract" }, { tool: "extract" }, { complete: "done" }] }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300)); // let the scripts reach their pauses or finish
+
+  const started = Date.now();
+  await sync.tick();
+  const tickMs = Date.now() - started;
+  // Each run needs 2–3 reads of 40 ms; one at a time that is ~4 s, eight at a time well under 2 s.
+  assert.ok(tickMs < 2_000, `tick took ${tickMs} ms`);
+
+  await eventually(async () => {
+    await sync.tick();
+    return ids.every((id) => store.getRun(id)?.status === "PAUSED" || store.getRun(id)?.status === "COMPLETED");
+  }, 10_000);
+  const pauses = store.interventionsByRun();
+  assert.equal(ids.filter((_, i) => i % 2).every((id) => pauses.get(id)?.length === 1), true, "every paused run has one card");
+  assert.equal(ids.filter((_, i) => i % 2 === 0).every((id) => !pauses.has(id)), true, "runs that never paused have none");
+  const steps = store.stepCounts();
+  assert.equal(steps.get(must(ids[0], "run")), 2, "tool calls counted, pause excluded");
+  assert.equal(steps.get(must(ids[1], "run")), 1);
+});
+
+test("the proof read starts at the reply: parts before a pause's result are not included", (t) => {
+  const store = openStore(tempDb());
+  t.after(() => store.close());
+  const part = (kind: string, toolName: string | null, toolCallId: string | null) => ({ type: kind, text: null, toolName, toolCallId, payload: "{}" });
+  store.appendMessages(
+    "r",
+    [
+      { id: "m1", createdAt: 1, role: "assistant", parts: [part("tool-call", "type", "early")] },
+      { id: "m2", createdAt: 2, role: "assistant", parts: [part("tool-call", "pause", "p")] },
+      { id: "m3", createdAt: 3, role: "tool", parts: [part("tool-result", "pause", "p")] },
+      { id: "m4", createdAt: 4, role: "assistant", parts: [part("tool-call", "snapshot", "s")] },
+    ],
+    (s) => s,
+  );
+  assert.deepEqual(afterReply(store.partsFromPauseResult("r", "p", 60), "p"), { steps: ["snapshot"], typed: false }, "the typing before the pause does not count");
+  assert.deepEqual(store.partsFromPauseResult("r", "unanswered", 60), []);
+});
+
+test("saved login: the password reaches Browserbase only as a variable and is never stored", async (t) => {
+  const h = await setup();
+  t.after(() => h.close());
+  const PASSWORD = "S3cret-Value-!9";
+  const deps = { ...h.deps, credentials: memoryCredentials([{ site: "portal.test", username: "armaan", password: PASSWORD }]) };
+  const runId = h.fake.startRun({ task: "Get the invoice from https://portal.test", pauseWhen: "sign-in", steps: TAKEOVER });
+  const pause = await h.openPause(runId);
+
+  const missing = await resolvePause(deps, pause.id, { key: "k-missing-1", type: "credentials", site: "other.test" });
+  assert.equal(missing.ok, false, "no saved login for that site: nothing is sent");
+  assert.equal(h.fake.resumeCalls(runId), 0);
+
+  const result = await resolvePause(deps, pause.id, { key: "k-cred-1", type: "credentials", site: "portal.test" });
+  assert.ok(result.ok && result.intervention.state === "resumed");
+  assert.deepEqual([...h.fake.receivedVariables(runId)].sort(), ["login_password", "login_username"]);
+  const resolution = must(result.intervention.resolution, "resolution");
+  assert.match(resolution.sentTask, /%login_password%/);
+  assert.equal(resolution.summary, "used the saved login for portal.test (armaan)");
+
+  await h.settle(runId, () => h.store.getRun(runId)?.status === "COMPLETED");
+  const raw = new DatabaseSync(h.db, { readOnly: true });
+  const tables = ["runs", "messages", "interventions", "events"];
+  const leaked = tables.filter((table) => {
+    const columns = (raw.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
+    const where = columns.map((c) => `instr(CAST(${c} AS TEXT), ?) > 0`).join(" OR ");
+    return (raw.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${where}`).get(...columns.map(() => PASSWORD)) as { n: number }).n > 0;
+  });
+  raw.close();
+  assert.deepEqual(leaked, [], "the password is in no table");
+});
+
+test("saved login matching: by the site in the question, task or steps, including subdomains", () => {
+  const saved = [{ site: "portal.test", username: "a" }, { site: "acme.com", username: "b" }];
+  assert.equal(matchLogin(saved, ["I'm stuck at https://login.acme.com/sso"])?.site, "acme.com");
+  assert.equal(matchLogin(saved, ["", "Download the invoice from portal.test"])?.site, "portal.test");
+  assert.equal(matchLogin(saved, ["Which airport, BOS or BED?"]), null);
+  assert.equal(matchLogin(saved, ["see notacme.com"]), null, "a different site that merely ends in the same letters does not match");
 });

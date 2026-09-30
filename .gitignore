@@ -5,3 +5,6 @@ node_modules/
 inbox.db*
 inbox-demo.db*
 inbox-remember.db*
+# Which sites have a saved login (site + username; passwords are in the Keychain only).
+inbox-logins.json
+inbox-loom.db*

@@ -34,6 +34,8 @@ export interface FakePage {
     readonly then: { readonly url: string; readonly title: string };
     /** Completing it signs the browser in to this site; a browser already signed in skips straight to `then`. */
     readonly signsIn?: string;
+    /** A login form instead of a single button: only these credentials complete it. */
+    readonly login?: { readonly username: string; readonly password: string };
   };
 }
 
@@ -86,6 +88,8 @@ export interface FakeBrowserbase {
   readonly url: string;
   /** Start a run with a script. What `POST /v1/agents/runs` does, with a chosen script. */
   startRun(input: RunInput): string;
+  /** Create a Context (a saved browser profile), like POST /v1/contexts. */
+  createContext(): string;
   /** Script for the next run created over HTTP (default: say one line, then complete). */
   nextScript(steps: readonly Step[], sessionTtlMs?: number): void;
   injectResumeFault(fault: ResumeFault): void;
@@ -109,7 +113,17 @@ interface RunInput {
 
 const iso = (ms = Date.now()) => new Date(ms).toISOString();
 
-export async function startFakeBrowserbase(options: { port?: number; stepMs?: number; sessionTtlMs?: number } = {}): Promise<FakeBrowserbase> {
+export async function startFakeBrowserbase(
+  options: {
+    port?: number;
+    stepMs?: number;
+    sessionTtlMs?: number;
+    /** Delay before every API answer, like a network round trip. */
+    latencyMs?: number;
+    /** "quiet": a small grey note instead of the red banner; "none": no label (recordings only). */
+    pageLabel?: "banner" | "quiet" | "none";
+  } = {},
+): Promise<FakeBrowserbase> {
   const stepMs = options.stepMs ?? 400;
   const defaultTtl = options.sessionTtlMs ?? 60 * 60_000;
   const runs = new Map<string, FakeRun>();
@@ -143,6 +157,21 @@ export async function startFakeBrowserbase(options: { port?: number; stepMs?: nu
     const session = sessions.get(run.sessionId);
     if (session && session.status === "RUNNING") {
       session.status = status === "TIMED_OUT" ? "TIMED_OUT" : "COMPLETED";
+      if (session.context?.persist) contexts.set(session.context.id, new Set(session.signedIn));
+    }
+  };
+
+  /**
+   * The session hits its time limit. Matches live Browserbase (2026-09-29): a
+   * PAUSED run's session became COMPLETED at its limit and the run itself still
+   * said PAUSED minutes later. GUESS: a run still working becomes TIMED_OUT.
+   */
+  const sessionLimit = (run: FakeRun) => {
+    if (["COMPLETED", "FAILED", "STOPPED", "TIMED_OUT"].includes(run.status)) return;
+    if (run.status !== "PAUSED") return end(run, "TIMED_OUT");
+    const session = sessions.get(run.sessionId);
+    if (session && session.status === "RUNNING") {
+      session.status = "COMPLETED";
       if (session.context?.persist) contexts.set(session.context.id, new Set(session.signedIn));
     }
   };
@@ -210,11 +239,7 @@ export async function startFakeBrowserbase(options: { port?: number; stepMs?: nu
       receivedVariables: [],
     };
     runs.set(runId, run);
-    // GUESS: the docs do not say what a paused run's status becomes when its
-    // session times out before a resume. Here it becomes TIMED_OUT at once.
-    later(ttl, () => {
-      if (!["COMPLETED", "FAILED", "STOPPED", "TIMED_OUT"].includes(run.status)) end(run, "TIMED_OUT");
-    });
+    later(ttl, () => sessionLimit(run));
     advance(run);
     return runId;
   };
@@ -238,6 +263,16 @@ export async function startFakeBrowserbase(options: { port?: number; stepMs?: nu
       },
     ]);
     run.receivedVariables.push(...Object.keys(variables ?? {}));
+    // Like the real agent typing %login_username% / %login_password%: the values are only
+    // compared against the page's login, never kept.
+    const value = (name: string) => {
+      const v = variables?.[name];
+      return v && typeof v === "object" && "value" in v ? (v as { value: unknown }).value : undefined;
+    };
+    const session = sessions.get(run.sessionId);
+    if (session?.page.challenge?.login && value("login_password") !== undefined) {
+      complete(session, { username: value("login_username"), password: value("login_password") });
+    }
     run.pendingPause = null;
     run.status = "RUNNING";
     advance(run);
@@ -266,21 +301,43 @@ export async function startFakeBrowserbase(options: { port?: number; stepMs?: nu
     }
   };
 
+  /** The page as the browser shows it: a login challenge says it has a form, never what the password is. */
+  const publicPage = (page: FakePage) =>
+    page.challenge ? { ...page, challenge: { label: page.challenge.label, then: page.challenge.then, form: Boolean(page.challenge.login) } } : page;
+
+  /** Complete the current page's challenge, as a person in Live View or an agent typing would. */
+  const complete = (session: FakeSession, typed?: { username?: unknown; password?: unknown }): string | null => {
+    const challenge = session.page.challenge;
+    if (!challenge) return null;
+    if (challenge.login && (typed?.username !== challenge.login.username || typed?.password !== challenge.login.password)) return "Wrong username or password.";
+    if (challenge.signsIn) session.signedIn.add(challenge.signsIn);
+    session.page = { ...challenge.then };
+    return null;
+  };
+
   const livePage = (session: FakeSession) => `<!doctype html><meta charset="utf-8">
 <title>Simulated browser</title>
 <style>body{font:15px system-ui;margin:0;background:#fafaf8;color:#222}
 .bar{background:#b3261e;color:#fff;font-weight:700;padding:6px 12px;font-size:12px;letter-spacing:.06em}
-.url{padding:8px 12px;border-bottom:1px solid #ddd;font:13px ui-monospace,monospace;color:#555}
-main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-radius:6px;border:0;background:#1d5fd1;color:#fff;cursor:pointer}</style>
-<div class="bar">SIMULATED BROWSER — not a real Browserbase session</div>
+.quiet{position:fixed;right:10px;bottom:8px;font:11px system-ui;color:#aaa}.url{padding:8px 12px;border-bottom:1px solid #ddd;font:13px ui-monospace,monospace;color:#555}
+main{padding:24px}.login{display:grid;gap:12px;max-width:320px}.login label{display:grid;gap:4px;font-size:13px;color:#555}
+.login input{font:inherit;padding:9px 10px;border:1px solid #bbb;border-radius:6px}.login .err{color:#b3261e;font-size:13px;margin:0;min-height:1em}button{font:inherit;font-weight:600;padding:10px 16px;border-radius:6px;border:0;background:#1d5fd1;color:#fff;cursor:pointer}</style>
+${options.pageLabel === "none" ? "" : options.pageLabel === "quiet" ? '<div class="quiet">simulated page</div>' : '<div class="bar">SIMULATED BROWSER — not a real Browserbase session</div>'}
 <div class="url" id="url"></div><main><h2 id="title"></h2><div id="body"></div></main>
 <script>
   function render(p){document.getElementById('url').textContent=p.url;document.getElementById('title').textContent=p.title;
     var body=document.getElementById('body');body.textContent='';
-    if(p.challenge){var b=document.createElement('button');b.textContent=p.challenge.label;
+    if(p.challenge&&p.challenge.form){
+      var f=document.createElement('form');f.className='login';
+      f.innerHTML='<label>Username<input name="username" autocomplete="off"></label><label>Password<input name="password" type="password" autocomplete="off"></label><button type="submit">'+p.challenge.label+'</button><p class="err"></p>';
+      f.onsubmit=function(e){e.preventDefault();fetch(location.pathname+'/act',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({username:f.username.value,password:f.password.value})}).then(function(r){return r.json()}).then(function(n){
+          if(n.error){f.querySelector('.err').textContent=n.error;return}render(n)})};
+      body.appendChild(f);}
+    else if(p.challenge){var b=document.createElement('button');b.textContent=p.challenge.label;
       b.onclick=function(){fetch(location.pathname+'/act',{method:'POST'}).then(function(r){return r.json()}).then(render)};body.appendChild(b);}
     else{body.textContent='Nothing needs doing on this page.';}}
-  render(${JSON.stringify(session.page).replace(/</g, "\\u003c")});
+  render(${JSON.stringify(publicPage(session.page)).replace(/</g, "\\u003c")});
 </script>`;
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -293,12 +350,9 @@ main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-r
       const session = sessions.get(parts[2]);
       if (!session) return json(res, 404, { error: "no session" });
       if (method === "POST" && parts[3] === "act") {
-        const challenge = session.status === "RUNNING" ? session.page.challenge : undefined;
-        if (challenge) {
-          if (challenge.signsIn) session.signedIn.add(challenge.signsIn);
-          session.page = { ...challenge.then };
-        }
-        return json(res, 200, session.page);
+        const typed = await readBody(req);
+        const error = session.status === "RUNNING" ? complete(session, typed) : null;
+        return json(res, 200, error ? { error } : publicPage(session.page));
       }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(livePage(session));
@@ -380,7 +434,8 @@ main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-r
       if (fault === "unknown_not_applied") return json(res, 500, { message: "Resume outcome is unknown" });
       const session = sessions.get(run.sessionId);
       if (run.status === "PAUSED" && session && session.expiresAt <= Date.now()) {
-        end(run, "TIMED_OUT");
+        // GUESS: what /resume answers once a paused run's browser is gone is unverified live.
+        sessionLimit(run);
         return json(res, 409, { message: "The run's browser session has ended" });
       }
       // Matches live Browserbase (Run 1): 409 {"statusCode":409,"error":"Conflict","message":"Run is not paused (RUNNING)."}
@@ -399,7 +454,9 @@ main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-r
   }
 
   const server = createServer((req, res) => {
-    route(req, res).catch((error: unknown) => json(res, 500, { message: String(error) }));
+    const handle = () => route(req, res).catch((error: unknown) => json(res, 500, { message: String(error) }));
+    if (options.latencyMs) setTimeout(handle, options.latencyMs);
+    else void handle();
   });
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
   const address = server.address();
@@ -409,6 +466,11 @@ main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-r
   return {
     url: baseUrl,
     startRun,
+    createContext() {
+      const id = randomUUID();
+      contexts.set(id, new Set());
+      return id;
+    },
     nextScript(steps, sessionTtlMs) {
       scripted = { steps, ttl: sessionTtlMs };
     },
@@ -426,7 +488,7 @@ main{padding:24px}button{font:inherit;font-weight:600;padding:10px 16px;border-r
       const session = run ? sessions.get(run.sessionId) : undefined;
       if (!run || !session) return;
       session.expiresAt = Date.now() - 1;
-      if (!["COMPLETED", "FAILED", "STOPPED", "TIMED_OUT"].includes(run.status)) end(run, "TIMED_OUT");
+      sessionLimit(run);
     },
     async close() {
       for (const t of timers) clearTimeout(t);

@@ -15,6 +15,7 @@
  * second resume.
  */
 import type { AgentsApi } from "./api.ts";
+import type { CredentialStore } from "./credentials.ts";
 import {
   applyResumeResult,
   beginResume,
@@ -32,7 +33,9 @@ const SECRET_VARIABLE = "human_reply";
 
 export type ReplyInput =
   | { readonly key: string; readonly type: "answer"; readonly text: string; readonly secret: boolean }
-  | { readonly key: string; readonly type: "takeover"; readonly note: string | null };
+  | { readonly key: string; readonly type: "takeover"; readonly note: string | null }
+  /** Sign in with the saved login for `site`: sent as variables, never stored. */
+  | { readonly key: string; readonly type: "credentials"; readonly site: string };
 
 export type ResolveOutcome =
   | { readonly ok: true; readonly intervention: Intervention; readonly replay: boolean }
@@ -42,6 +45,7 @@ export type ResolveOutcome =
 export interface ResolveDeps {
   readonly store: Store;
   readonly api: AgentsApi;
+  readonly credentials?: CredentialStore;
   readonly now?: () => number;
 }
 
@@ -51,6 +55,26 @@ async function prepare(
   intervention: Intervention,
   input: ReplyInput,
 ): Promise<{ resolution: Resolution; body: { task: string; variables?: Record<string, { value: string; description: string }> } } | null> {
+  if (input.type === "credentials") {
+    // The agent sees only the placeholders; Browserbase substitutes the values when it
+    // types, and they do not enter the transcript (verified live, 2026-09-30).
+    const login = deps.credentials?.list().find((l) => l.site === input.site);
+    const password = login ? deps.credentials?.password(login.site) : null;
+    if (!login || !password) return null;
+    const task =
+      "Credentials are provided as variables. On the sign-in page, type %login_username% into the username field and " +
+      "%login_password% into the password field, submit, then continue with your task.";
+    return {
+      resolution: { type: "credentials", summary: `used the saved login for ${login.site} (${login.username})`, sentTask: task, page: null },
+      body: {
+        task,
+        variables: {
+          login_username: { value: login.username, description: `username for ${login.site}` },
+          login_password: { value: password, description: `password for ${login.site}` },
+        },
+      },
+    };
+  }
   if (input.type === "answer") {
     const text = input.text.trim();
     if (!text) return null;
@@ -113,7 +137,9 @@ export async function resolvePause(deps: ResolveDeps, id: string, input: ReplyIn
   }
 
   const prepared = await prepare(deps, existing, input);
-  if (!prepared) return { ok: false, code: "bad_input", message: "a reply needs some text" };
+  if (!prepared) {
+    return { ok: false, code: "bad_input", message: input.type === "credentials" ? `no saved login for ${input.site}` : "a reply needs some text" };
+  }
 
   const claimed = store.tx(() => {
     const current = store.getIntervention(id);

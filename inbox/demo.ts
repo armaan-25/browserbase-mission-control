@@ -15,6 +15,7 @@
  * themselves are gone, since the simulator keeps them in memory); double-click Send.
  */
 import { agentsApi } from "./api.ts";
+import { memoryCredentials } from "./credentials.ts";
 import { startFakeBrowserbase } from "./fake-browserbase.ts";
 import { startInboxServer } from "./server.ts";
 import { openStore } from "./store.ts";
@@ -25,7 +26,10 @@ const store = openStore(process.env.INBOX_DB ?? new URL("../inbox-demo.db", impo
 const api = agentsApi({ apiKey: "simulated", baseUrl: fake.url });
 const sync = createSync({ store, api, discover: true, graceMs: 5_000 });
 sync.recover();
-const inbox = await startInboxServer({ store, api, sync, simulated: true, port: Number(process.env.INBOX_PORT ?? 4821) });
+const inbox = await startInboxServer({ store, api, sync, simulated: true,
+  // SIMULATED saved login, so the demo can show "Sign in with saved login" without your Keychain.
+  credentials: memoryCredentials([{ site: "billing.example.test", username: "demo", password: "simulated-password" }]),
+  port: Number(process.env.INBOX_PORT ?? 4821) });
 sync.start(1_000);
 
 fake.startRun({
@@ -87,8 +91,7 @@ console.log("run 4's browser session ends 45s after it starts; leave it unanswer
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    sync.stop();
-    void Promise.all([inbox.close(), fake.close()]).finally(() => {
+    void Promise.all([sync.stop(), inbox.close(), fake.close()]).finally(() => {
       store.close();
       process.exit(0);
     });

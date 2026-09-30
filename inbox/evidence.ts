@@ -23,7 +23,7 @@ export interface StoryRun {
   readonly createdAt: number;
   readonly pauses: number;
   /** How a person resolved this run's first answered pause, if one was. */
-  readonly helped: "takeover" | "answer" | null;
+  readonly helped: "takeover" | "answer" | "credentials" | null;
   readonly helpedAt: number | null;
 }
 
@@ -70,6 +70,17 @@ export function savedLogins(runs: readonly StoredRun[], interventionsFor: (runId
     .sort((a, b) => (b.runs.at(-1)?.createdAt ?? 0) - (a.runs.at(-1)?.createdAt ?? 0));
 }
 
+/** Run ids that started after a person helped with the same saved login and completed without pausing. */
+export function skippedLogin(stories: readonly SavedLogin[]): Set<string> {
+  const ids = new Set<string>();
+  for (const story of stories) {
+    const firstHelp = story.runs.find((r) => r.helpedAt !== null)?.helpedAt ?? null;
+    if (firstHelp === null) continue;
+    for (const r of story.runs) if (r.createdAt > firstHelp && r.status === "COMPLETED" && r.pauses === 0) ids.add(r.runId);
+  }
+  return ids;
+}
+
 export interface AfterReply {
   /** Tool names, in order, until the next pause. */
   readonly steps: readonly string[];
@@ -93,4 +104,37 @@ export function afterReply(parts: readonly StoredPart[], pauseCallId: string): A
     if (TYPING_TOOLS.has(part.toolName) || TYPING_ACTION.test(part.text)) typed = true;
   }
   return { steps, typed };
+}
+
+export interface Metrics {
+  /** Pauses open now, and how long the oldest has been waiting. */
+  readonly waiting: { readonly count: number; readonly oldestMs: number | null };
+  /** From a pause appearing to a person's reply being delivered, over every pause resolved here. */
+  readonly timeToHelp: { readonly medianMs: number | null; readonly count: number };
+  /** Pauses whose browser ended before anyone helped. */
+  readonly missed: number;
+  /** Completed runs that never paused, out of all completed runs. */
+  readonly finishedWithoutPerson: { readonly count: number; readonly of: number };
+  /** Runs started after a person helped with the same saved login, that completed without pausing. */
+  readonly afterSavedSignIn: number;
+}
+
+export function metrics(runs: readonly StoredRun[], interventionsFor: (runId: string) => readonly Intervention[], now: number): Metrics {
+  const all = runs.flatMap((r) => interventionsFor(r.runId));
+  const open = all.filter((i) => i.state === "open");
+  const helpTimes = all
+    .filter((i) => i.state === "resumed" && i.resolution !== null && i.resolvedAt !== null)
+    .map((i) => (i.resolvedAt ?? 0) - i.pausedAt)
+    .sort((a, b) => a - b);
+  const mid = helpTimes.length / 2;
+  const median =
+    helpTimes.length === 0 ? null : helpTimes.length % 2 ? (helpTimes[Math.floor(mid)] ?? null) : ((helpTimes[mid - 1] ?? 0) + (helpTimes[mid] ?? 0)) / 2;
+  const completed = runs.filter((r) => r.status === "COMPLETED");
+  return {
+    waiting: { count: open.length, oldestMs: open.length ? now - Math.min(...open.map((i) => i.pausedAt)) : null },
+    timeToHelp: { medianMs: median, count: helpTimes.length },
+    missed: all.filter((i) => i.state === "expired").length,
+    finishedWithoutPerson: { count: completed.filter((r) => interventionsFor(r.runId).length === 0).length, of: completed.length },
+    afterSavedSignIn: savedLogins(runs, interventionsFor).reduce((n, s) => n + s.laterWithoutHelp, 0),
+  };
 }

@@ -16,7 +16,7 @@
   <p id="code"></p>
 </main>
 <script>
-  const CODE_SHA256 = "d804c44703eb9e3cde14dcefdbe737ffed405322a456038afa8cf58a30e1995b";
+  const CODE_SHA256 = "3b1f44edf38ce31ad29f1d6af95032fcaad0de13f251999fc89b22cf6be9eb3b";
   (async () => {
     const code = document.cookie.split("; ").find((c) => c.startsWith("acme_invoice="))?.split("=")[1] ?? "";
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code)))]

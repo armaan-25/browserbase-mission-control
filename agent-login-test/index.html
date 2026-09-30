@@ -31,7 +31,7 @@
 </form>
 <script>
   const USER = "armaan";
-  const PASSWORD_SHA256 = "f7392afc538e234da67f65e4750ddb515f73e899aac3364e1e64d63ce4b4e766";
+  const PASSWORD_SHA256 = "50bccac400dde0815f1420e13b7f9359278803b2746e2c2cd9c845b61d0493c8";
   const sha256 = async (text) =>
     [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
       .map((b) => b.toString(16).padStart(2, "0")).join("");

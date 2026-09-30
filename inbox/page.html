@@ -4,138 +4,217 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Agent inbox</title>
+<title>Mission control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&display=swap">
 <style>
-  :root { --bg:#f5f5f2; --card:#fff; --line:#e1e1dc; --text:#1a1a19; --dim:#62625d; --soft:#f0f0ec;
-          --accent:#1d5fd1; --accent-hover:#174fb0; --ok:#1e7a45; --warn:#9a5208; --bad:#b3261e;
-          --warn-soft:#fbf0e2; --bad-soft:#fbe9e7; --ok-soft:#e6f3eb; --focus:#1d5fd1; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#131313; --card:#1c1c1b; --line:#2e2e2c; --text:#ececea; --dim:#a3a39d; --soft:#242423;
-            --accent:#6ea0ff; --accent-hover:#8cb4ff; --ok:#5cc98c; --warn:#f0a55a; --bad:#ff7b72;
-            --warn-soft:#33261a; --bad-soft:#3a1e1c; --ok-soft:#18301f; --focus:#8cb4ff; }
-  }
+  /* A control-room wall: one tile per agent run, showing its live browser (Browserbase
+     Live View, view-only). A run waiting on a person turns orange and pings; opening a
+     tile gives its full browser and everything needed to help it.
+     Browserbase orange #DE381A was sampled from their title cards; on this dark
+     surface the lighter #F04A24 is used. */
+  :root { --bg:#0b0b0a; --panel:#141312; --panel-2:#1b1a18; --line:#292724; --text:#f1eee9; --dim:#a39d95; --faint:#6b665f;
+          --brand:#f04a24; --brand-ink:#170804; --ok:#4fc184; --ok-ink:#06140b; --bad:#ff7b72;
+          --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .sim-bar { background: #b3261e; color: #fff; font-size: 13px; font-weight: 600; text-align: center; padding: 6px 16px; }
-  main { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; }
-  header { margin-bottom: 8px; }
-  h1 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 2px; }
-  .lede { color: var(--dim); margin: 0; }
-  .summary { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 16px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--dim); }
-  .summary b { font-variant-numeric: tabular-nums; color: var(--text); margin-right: 4px; }
-  .summary .zero { opacity: .6; } .summary .zero b { color: var(--dim); }
-  .summary .attn b { color: var(--warn); }
-  h2 { font-size: 17px; margin: 40px 0 12px; }
-  h2 .n { color: var(--dim); font-weight: 400; margin-left: 6px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
-  .card.urgent { border-color: var(--bad); }
-  .card.done { background: transparent; }
-  .row { display: flex; gap: 6px 12px; align-items: center; flex-wrap: wrap; }
-  .state { font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
-  .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-  .state.open { color: var(--warn); } .state.resumed { color: var(--ok); }
-  .state.outcome_unknown, .state.resuming { color: var(--accent); }
-  .state.expired, .state.superseded { color: var(--bad); }
-  .meta { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
-  .timer { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--dim);
-           padding: 2px 10px; border-radius: 999px; background: var(--soft); }
-  .timer.soon { color: var(--warn); background: var(--warn-soft); }
-  .timer.now, .timer.ended { color: var(--bad); background: var(--bad-soft); }
-  .ask { font-size: 18px; line-height: 1.45; font-weight: 500; margin: 12px 0 6px; white-space: pre-wrap; max-width: 68ch; }
-  .card.done .ask { font-size: 16px; font-weight: 400; color: var(--dim); }
-  .task { color: var(--dim); font-size: 14px; margin: 0; }
-  .task b { color: var(--text); font-weight: 600; }
-  details { margin: 10px 0 0; } summary { cursor: pointer; color: var(--dim); font-size: 13px; width: fit-content; }
-  ol.steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--dim); }
-  ol.steps code { font-size: 12px; color: var(--text); }
-  .reply { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
   button { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
-           background: var(--card); color: var(--text); cursor: pointer; transition: background-color .15s, border-color .15s; }
+           background: var(--panel-2); color: var(--text); cursor: pointer; transition: background-color .15s, border-color .15s; }
   button:hover:not(:disabled) { border-color: var(--dim); }
-  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-  @media (prefers-color-scheme: dark) { button.primary { color: #0d1a33; } }
+  button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  button.primary:hover:not(:disabled) { background: #ff6a47; border-color: #ff6a47; }
   button:disabled { opacity: .5; cursor: default; }
-  :is(button, textarea, input, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  textarea { width: 100%; min-height: 60px; font: inherit; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
-             background: var(--bg); color: var(--text); resize: vertical; display: block; }
-  textarea::placeholder, input::placeholder { color: var(--dim); }
-  label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--dim); margin-top: 8px; }
+  :is(button, textarea, input, summary, .tile):focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  textarea, input[type=text] { width: 100%; font: inherit; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
+                               background: var(--bg); color: var(--text); }
+  textarea { min-height: 64px; resize: vertical; display: block; }
+  textarea.reply { min-height: 0; resize: none; font-size: 15px; }
+  ::placeholder { color: var(--faint); }
+
+  .sim-bar { background: #b3261e; color: #fff; font-size: 13px; font-weight: 600; text-align: center; padding: 6px 16px; }
+  header.top { display: flex; align-items: flex-end; gap: 12px 28px; padding: 22px 28px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  h1 { font: 700 34px/1 var(--display); text-transform: uppercase; margin: 0; display: flex; gap: 10px; align-items: center; }
+  h1::before { content: ""; width: 14px; height: 14px; background: var(--brand); border-radius: 3px; }
+  .lede { color: var(--dim); margin: 0; font-size: 13px; }
+  .demo-tag { font-size: 11px; font-weight: 600; color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+
+  .metrics { display: flex; gap: 22px; margin-left: auto; flex-wrap: wrap; }
+  .metric { background: none; border: 0; padding: 0; text-align: left; color: inherit; border-radius: 0; font-weight: 400; }
+  .metric b { display: block; font: 700 30px/1 var(--display); font-variant-numeric: tabular-nums; }
+  .metric .label { font: 600 13px/1.2 var(--display); text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+  .metric .sub { font-size: 12px; color: var(--faint); }
+  .metric.hot b { color: var(--brand); } .metric.bad b { color: var(--bad); } .metric.good b { color: var(--ok); } .metric.none b { color: var(--faint); }
+  button.metric { cursor: pointer; } button.metric:disabled { opacity: 1; cursor: default; }
+  button.metric:hover:not(:disabled) .label { color: var(--text); }
+
+  main { padding: 18px 28px 48px; }
+  .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .empty { color: var(--dim); padding: 40px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
+
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; position: relative; cursor: pointer; }
+  .tile:hover { border-color: #3a3733; }
+  .tile .top { display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 13px; min-height: 40px; }
+  .tile .task { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--panel-2); color: var(--dim);
+          white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chip.working::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dim);
+                          margin-right: 6px; vertical-align: 1px; animation: blink 1.4s infinite; }
+  .chip.done { color: var(--ok); background: #13261b; }
+  .chip.bad { color: var(--bad); background: #331a18; }
+  .sim { font: 600 11px system-ui; color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .screen { aspect-ratio: 16 / 10; background: #1d1c1a; position: relative; overflow: hidden; }
+  /* Live View rendered at twice the tile size, then scaled down, so pages keep desktop layout. */
+  .screen iframe { position: absolute; top: 0; left: 0; width: 200%; height: 200%; transform: scale(.5); transform-origin: 0 0;
+                   border: 0; pointer-events: none; }
+  .placeholder { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; color: var(--faint); }
+  .placeholder b { display: block; font: 700 26px/1.1 var(--display); text-transform: uppercase; color: var(--dim); }
+  .tags { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; }
+  .tag { font: 700 12px var(--display); text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 6px; }
+  .tag.saved { background: var(--panel-2); color: var(--dim); border: 1px solid var(--line); }
+  .tag.skipped { background: var(--ok); color: var(--ok-ink); }
+
+  /* Waiting on a person: orange bar, a ping ring, and the agent's own question. */
+  .tile.stuck { border-color: var(--brand); }
+  .tile.stuck::after { content: ""; position: absolute; inset: -1px; border-radius: 12px; border: 2px solid var(--brand);
+                       animation: ping 1.8s cubic-bezier(.16, 1, .3, 1) infinite; pointer-events: none; }
+  .tile.stuck .top { background: var(--brand); color: var(--brand-ink); font-weight: 600; }
+  .tile.stuck .top .chip { background: var(--brand-ink); color: var(--brand); }
+  .tile.stuck .top .sim { color: var(--brand-ink); border-color: var(--brand-ink); }
+  .tile.urgent.stuck .top .chip { background: #fff; color: #b3261e; }
+  .ask-over { position: absolute; left: 10px; right: 10px; bottom: 10px; background: rgba(11, 11, 10, .93); border-radius: 10px;
+              padding: 10px 12px; font-size: 14px; line-height: 1.35; cursor: default; }
+  .ask-over p { margin: 0 0 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .ask-over .actions { display: flex; gap: 8px; }
+  .ask-over button { padding: 6px 12px; font-size: 13px; }
+
+  @keyframes ping { from { transform: scale(1); opacity: .9; } to { transform: scale(1.05); opacity: 0; } }
+  @keyframes blink { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .tile.stuck::after, .chip.working::before { animation: none; } }
+
+  /* One agent, full size. */
+  .back { margin-bottom: 14px; }
+  .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+  .focus .tile { cursor: default; }
+  .focus .screen { aspect-ratio: 16 / 9.4; }
+  .focus .screen iframe { width: 100%; height: 100%; transform: none; }
+  .focus .screen.interactive iframe { pointer-events: auto; }
+  .side { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .side .state { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .side .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .state.open { color: var(--brand); } .state.resumed, .state.running, .state.done { color: var(--ok); }
+  .state.outcome_unknown, .state.resuming { color: #8cb4ff; } .state.expired, .state.superseded, .state.failed { color: var(--bad); }
+  .status-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .status-row .ends { font-size: 13px; color: var(--dim); }
+  .side .ask { font-size: 21px; line-height: 1.4; margin: 2px 0 4px; white-space: pre-wrap; letter-spacing: -.01em; }
+  .side .big-timer { font: 700 22px/1 var(--display); font-variant-numeric: tabular-nums; color: var(--dim); }
+  details.more { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 6px; }
+  details.more[open] summary { margin-bottom: 4px; }
+  .side .big-timer.soon { color: var(--brand); } .side .big-timer.now, .side .big-timer.ended { color: var(--bad); }
+  .side .label { font-size: 12px; color: var(--dim); }
+  .side .task { font-size: 14px; color: var(--dim); margin: 0; } .side .task b { color: var(--text); font-weight: 600; }
+  .carry { font-size: 13px; color: var(--ok); margin: 0; }
+  .meta { color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
+  .proof { color: var(--ok); font-weight: 600; font-size: 14px; }
+  details summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+  ol.steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--dim); }
+  ol.steps code { color: var(--text); }
+  label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--dim); }
   label.check input { margin: 3px 0 0; }
-  .live { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 10;
-          display: grid; place-items: center; background: var(--soft); }
-  .live iframe { width: 100%; height: 100%; border: 0; }
-  .result { margin-top: 8px; font-size: 14px; } .result.bad { color: var(--bad); }
-  .receipt { margin-top: 12px; font-size: 14px; display: grid; gap: 2px; }
-  .empty { color: var(--dim); margin: 0; padding: 20px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: baseline; }
-  th { color: var(--dim); font-weight: 500; font-size: 13px; }
-  td.status { white-space: nowrap; font-weight: 600; }
-  td.time { white-space: nowrap; color: var(--dim); font-variant-numeric: tabular-nums; }
-  .s-needs_attention { color: var(--warn); } .s-running { color: var(--accent); } .s-completed { color: var(--ok); }
-  .s-failed, .s-expired { color: var(--bad); }
-  .cause { display: block; color: var(--dim); font-size: 13px; }
-  @media (max-width: 600px) {
-    main { padding-top: 24px; }
-    .ask { font-size: 17px; }
-    .timer { margin-left: 0; }
-    table, tbody, tr, td { display: block; } tr.head { display: none; }
-    tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
-    td { border: 0; padding: 0; }
-    td.status, td.time { display: inline; margin-right: 10px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .side .actions button { flex: 1; }
+  .guard { padding: 12px 14px; border-radius: 10px; background: #33190f; border: 1px solid var(--brand); font-size: 14px; }
+  .guard p { margin: 0 0 8px; }
+  .result { font-size: 14px; } .result.bad { color: var(--bad); }
+  .receipt { display: grid; gap: 4px; font-size: 14px; }
+  .history h2 { font: 700 20px/1 var(--display); text-transform: uppercase; letter-spacing: .02em; margin: 30px 0 10px; }
+  .history h2 .n { color: var(--faint); margin-left: 6px; }
+  .rows { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; width: 100%;
+         padding: 10px 14px; background: var(--panel); border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+         text-align: left; font-weight: 400; color: var(--text); }
+  .row:last-child { border-bottom: 0; }
+  .row.more-row { display: block; text-align: center; color: var(--dim); font-weight: 600; }
+  .row:hover:not(:disabled) { background: var(--panel-2); }
+  .row .rtask { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .row .rmeta { font-size: 13px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row .chip { justify-self: start; }
+  .row .tag { position: static; }
+  .focus-grid.no-screen { grid-template-columns: minmax(0, 720px); }
+  .bulk { display: grid; gap: 8px; margin-bottom: 14px; }
+  .bulk-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px;
+              background: #2a140c; border: 1px solid var(--brand); }
+  .bulk-row .what { flex: 1; min-width: 220px; font-size: 14px; }
+  .bulk-row .what b { font: 700 18px var(--display); text-transform: uppercase; color: var(--brand); margin-right: 6px; }
+  .bulk-row input[type=text] { width: auto; flex: 1; min-width: 180px; padding: 7px 10px; font-size: 14px; }
+  .bulk-row .progress { font-size: 13px; color: var(--dim); }
+  button.signin { background: var(--ok); border-color: var(--ok); color: var(--ok-ink); }
+  button.signin:hover:not(:disabled) { background: #6bd49a; border-color: #6bd49a; }
+  form.track { display: flex; gap: 8px; margin-top: 22px; max-width: 420px; }
+  form.track input { flex: 1; min-width: 0; font-size: 14px; padding: 7px 10px; }
+
+  @media (max-width: 640px) {
+    .row { grid-template-columns: 84px minmax(0, 1fr); }
+    .row .rmeta, .row .rtags { grid-column: 2; }
   }
-  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ok);
-         background: var(--ok-soft); padding: 2px 10px; border-radius: 999px; margin-top: 8px; }
-  .carry { font-size: 14px; margin: 12px 0 0; color: var(--text); }
-  .carry b { color: var(--ok); }
-  .proof { color: var(--ok); font-weight: 600; }
-  .story { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px; }
-  .story h3 { font-size: 18px; letter-spacing: -.01em; margin: 0 0 2px; }
-  .story h3 em { font-style: normal; color: var(--ok); }
-  ol.timeline { list-style: none; margin: 14px 0 0; padding: 0; }
-  ol.timeline li { position: relative; padding: 0 0 14px 24px; }
-  ol.timeline li:last-child { padding-bottom: 0; }
-  ol.timeline li::before { content: ""; position: absolute; left: 4px; top: 7px; width: 10px; height: 10px; border-radius: 50%;
-                           background: var(--card); border: 2px solid var(--dim); box-sizing: border-box; }
-  ol.timeline li:not(:last-child)::after { content: ""; position: absolute; left: 8px; top: 19px; bottom: 2px; width: 2px; background: var(--line); }
-  ol.timeline li.helped::before { border-color: var(--warn); background: var(--warn); }
-  ol.timeline li.free::before { border-color: var(--ok); background: var(--ok); }
-  ol.timeline .what { font-weight: 600; }
-  form.track { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; }
-  form.track input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  @media (max-width: 860px) {
+    header.top, main { padding-left: 16px; padding-right: 16px; }
+    .metrics { margin-left: 0; gap: 16px; }
+    .focus-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="sim-bar" id="sim" hidden>Simulated runs. Nothing on this page reaches Browserbase.</div>
+<header class="top">
+  <div>
+    <h1>Mission control</h1>
+    <p class="lede"><span id="lede">Browserbase Agents runs and their live browsers.</span> <span class="demo-tag" id="demo-tag" hidden>Demo</span></p>
+  </div>
+  <div class="metrics" id="metrics"></div>
+</header>
 <main>
-  <header>
-    <h1>Agent inbox</h1>
-    <p class="lede">Browserbase Agents runs that paused for a person.</p>
-    <ul class="summary" id="counts"></ul>
-  </header>
-
-  <h2>Pauses<span class="n" id="open-n"></span></h2>
-  <div id="pauses"><p class="empty">Loading…</p></div>
-
-  <section id="logins-section" hidden>
-    <h2>Saved logins</h2>
-    <div id="logins"></div>
+  <section id="wall-view">
+    <section class="bulk" id="bulk" hidden aria-live="polite"></section>
+    <div class="wall" id="wall"></div>
+    <p class="empty" id="empty" hidden>No agent is running right now. Start a run on Browserbase and its live browser appears here.</p>
+    <section class="history" id="history-section" hidden>
+      <h2>Finished <span class="n" id="history-n"></span></h2>
+      <div class="rows" id="history"></div>
+    </section>
+    <form class="track" id="track">
+      <input type="text" id="track-id" placeholder="Track a run by id" aria-label="Run id">
+      <button type="submit">Track</button>
+    </form>
   </section>
-
-  <h2>All runs</h2>
-  <div id="runs"></div>
-  <form class="track" id="track">
-    <input id="track-id" placeholder="Track a run by id" aria-label="Run id">
-    <button type="submit">Track</button>
-  </form>
+  <section class="focus" id="focus" hidden>
+    <button class="back" id="back" type="button">← All agents</button>
+    <div class="focus-grid">
+      <div class="tile" id="f-tile">
+        <div class="top"><span class="task" id="f-task"></span><span class="chip" id="f-chip"></span></div>
+        <div class="screen" id="f-screen"></div>
+      </div>
+      <aside class="side" id="f-side" aria-live="polite"></aside>
+    </div>
+  </section>
 </main>
 <script>
-  var BUCKETS = [["needs_attention", "Waiting"], ["running", "Running"], ["completed", "Completed"], ["failed", "Failed"], ["expired", "Expired"]];
-  var pausesEl = document.getElementById("pauses");
-  var rendered = {};
+  var wall = document.getElementById("wall");
+  var tiles = {};          // runId -> { node, parts, liveUrl }
+  var last = null;         // the latest /api/state
+  var focusSig = null;     // what the side panel was built from
+  var focusScreen = null;  // what the big screen shows: "view:<runId>" or "takeover:<pauseId>"
   var clockOffset = 0;
+  // At scale: a tile plays its live browser only while it is on screen, and at most
+  // MAX_LIVE play at once. The finished list shows HISTORY_PAGE rows until asked for more.
+  var MAX_LIVE = Number(new URLSearchParams(location.search).get("maxLive")) || 12, HISTORY_PAGE = 25, showAllHistory = false;
+  var visibility = "IntersectionObserver" in window ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { var t = tiles[e.target.dataset.run]; if (t) t.visible = e.isIntersecting; });
+    if (last) renderWall();
+  }, { rootMargin: "200px" }) : null;
+  // Loaded previews plus ones still being fetched, so tiles starting together cannot overshoot.
+  function liveFrames() { return wall.querySelectorAll(".screen iframe").length + wall.querySelectorAll('.tile[data-loading="1"]').length; }
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -144,30 +223,41 @@
     return e;
   }
   function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : ""; }
-  // The browser session's time left, and how urgent it is: under 10 min "soon", under 2 min "now".
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  function duration(ms) {
+    var sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 60) return sec + "s";
+    var m = Math.floor(sec / 60);
+    if (m < 60) return m + "m " + (sec % 60) + "s";
+    return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+  // Time left on a browser session, and how urgent: under 10 min "soon", under 2 min "now".
   function remaining(ms) {
     var left = Math.round((ms - (Date.now() + clockOffset)) / 1000);
-    if (left <= 0) return { text: "Browser session ended", level: "ended" };
+    if (left <= 0) return { text: "0:00", level: "ended" };
     var m = Math.floor(left / 60), s = left % 60;
-    return { text: "Browser ends in " + m + ":" + (s < 10 ? "0" : "") + s, level: left < 120 ? "now" : left < 600 ? "soon" : "" };
-  }
-  function tick(timer) {
-    var r = remaining(Number(timer.dataset.expires));
-    timer.textContent = r.text;
-    timer.className = "timer " + r.level;
-    var c = timer.closest(".card");
-    if (c) c.classList.toggle("urgent", c.dataset.open === "1" && (r.level === "now" || r.level === "ended"));
+    return { text: m + ":" + (s < 10 ? "0" : "") + s, level: left < 120 ? "now" : left < 600 ? "soon" : "" };
   }
 
   // One idempotency key per attempt at a pause, kept across refreshes: a resend
   // after a lost response or a double-click is the same attempt, not a new one.
   function keyFor(p) {
-    var k = "reply:" + p.id + ":" + p.attempts + ":" + (p.state === "open" ? "next" : "sent");
     var name = "reply:" + p.id + ":" + p.attempts;
     var v = null;
     try { v = sessionStorage.getItem(name); } catch (e) {}
     if (!v) { v = crypto.randomUUID(); try { sessionStorage.setItem(name, v); } catch (e) {} }
     return v;
+  }
+
+  // Heuristic, and it only asks: a password-ish word, a code of digits, or a token that
+  // mixes letters with digits or symbols (e.g. "hunter2", "Xk9#pq", "482913"). Four-digit
+  // numbers alone are too common ("card ending 4242"); "pin"/"code" catch short ones.
+  function looksSecret(text) {
+    if (/\b(pass(word|code|phrase)?|pwd|pin|otp|2fa|mfa|code)\b/i.test(text)) return true;
+    return text.split(/\s+/).some(function (t) {
+      t = t.replace(/[.,;:!?)"']+$/, "");
+      return /^\d{5,10}$/.test(t) || (/^\S{6,64}$/.test(t) && /[A-Za-z]/.test(t) && /[\d_#$%&*@!^~+=]/.test(t) && !/^https?:/.test(t));
+    });
   }
 
   function post(path, body) {
@@ -196,121 +286,504 @@
     })();
   }
 
-  var STATE_TEXT = {
-    open: "Waiting for you",
-    resuming: "Sending your reply",
-    outcome_unknown: "Checking",
-    resumed: "Agent continued",
-    superseded: "Moved on",
-    expired: "Expired"
-  };
+  // One delivery to one pause, for bulk actions: same idempotency key as a click would use.
+  function sendQuiet(p, payload) {
+    payload.key = keyFor(p);
+    return post("/api/interventions/" + encodeURIComponent(p.id) + "/reply", payload).then(function (res) { return res.status === 200; }, function () { return false; });
+  }
+
+  var STATE_TEXT = { open: "Waiting for you", resuming: "Sending your reply", outcome_unknown: "Checking",
+                     resumed: "Agent continued", superseded: "Moved on", expired: "Expired" };
   var RECEIPT_TEXT = {
     accepted: "Browserbase accepted the reply and the run is running again.",
     reply_seen: "The run's transcript shows your reply as the answer to this pause.",
     moved_past: "The run moved past this pause. Its transcript did not show whose reply it received."
   };
 
-  function card(p) {
-    var open = p.state === "open";
-    var c = el("section", "card" + (open ? "" : " done"));
-    c.dataset.open = open ? "1" : "0";
-    var head = el("div", "row");
-    head.appendChild(el("span", "state " + p.state, STATE_TEXT[p.state] || p.state));
-    head.appendChild(el("span", "meta", "run " + p.runId.slice(0, 8) + " · paused " + clock(p.pausedAt)));
-    if (p.sessionExpiresAt && (open || p.state === "outcome_unknown")) {
-      var t = el("span", "timer");
-      t.dataset.expires = String(p.sessionExpiresAt);
-      head.appendChild(t);
-      tick(t);
-    }
-    c.appendChild(head);
-    c.appendChild(el("p", "ask", p.message));
-    var task = el("p", "task", "Task: ");
-    task.appendChild(el("b", null, p.task || "(not loaded yet)"));
-    c.appendChild(task);
-    if (p.contextId && open) c.appendChild(el("span", "tag", "Saved login · " + p.contextId.slice(0, 8)));
+  /* ---------- lookups over the latest state ---------- */
+  function runById(id) { return last && last.runs.find(function (r) { return r.runId === id; }); }
+  // The pause a person would care about for this run: the open one, else the latest.
+  function pauseFor(runId) {
+    var list = last ? last.interventions.filter(function (p) { return p.runId === runId; }) : [];
+    return list.find(function (p) { return p.state === "open"; }) || list.find(function (p) { return p.state === "resuming" || p.state === "outcome_unknown"; }) || list[0] || null;
+  }
+  function tileStatus(run, pause) {
+    if (pause && pause.state === "open") return "stuck";
+    if (pause && (pause.state === "resuming" || pause.state === "outcome_unknown")) return "sending";
+    if (run.bucket === "expired" || run.status === "TIMED_OUT") return "expired";
+    if (run.status === "COMPLETED") return "done";
+    if (run.status === "NOT FOUND" || run.bucket === "failed") return "failed";
+    if (run.status === "loading" || run.status === "PENDING") return "starting";
+    return "working";
+  }
 
-    if (p.steps && p.steps.length) {
-      var d = el("details");
-      d.appendChild(el("summary", null, "What the agent did before pausing (" + p.steps.length + ")"));
+  /* ---------- the wall ---------- */
+  function makeTile(runId) {
+    var node = el("section", "tile");
+    node.dataset.run = runId;
+    node.tabIndex = 0;
+    var top = el("div", "top");
+    var task = el("span", "task");
+    var chip = el("span", "chip");
+    var sim = el("span", "sim", "SIM");
+    top.appendChild(task); top.appendChild(chip); top.appendChild(sim);
+    var screen = el("div", "screen");
+    var placeholder = el("div", "placeholder");
+    var tags = el("div", "tags");
+    var over = el("div", "ask-over"); over.hidden = true;
+    screen.appendChild(placeholder); screen.appendChild(tags); screen.appendChild(over);
+    node.appendChild(top); node.appendChild(screen);
+    node.onclick = function (e) { if (!e.target.closest("button")) openFocus(runId); };
+    node.onkeydown = function (e) { if (e.key === "Enter" && e.target === node) openFocus(runId); };
+    over.onclick = function (e) { e.stopPropagation(); };
+    wall.appendChild(node);
+    if (visibility) visibility.observe(node);
+    return { visible: !visibility, node: node, task: task, chip: chip, sim: sim, screen: screen, placeholder: placeholder, tags: tags, over: over, liveUrl: null, overSig: null };
+  }
+
+  // Show the run's live browser in the tile, view-only, while it is alive.
+  function syncTileScreen(t, run) {
+    var frame = t.screen.querySelector("iframe");
+    if (!run.live || !t.visible) {
+      if (frame) frame.remove();
+      t.liveUrl = null;
+      return;
+    }
+    if (frame || t.loading || liveFrames() >= MAX_LIVE) return;
+    t.loading = true; t.node.dataset.loading = "1";
+    fetch("/api/runs/" + encodeURIComponent(run.runId) + "/live").then(function (r) { return r.json(); }).then(function (live) {
+      t.loading = false; delete t.node.dataset.loading;
+      if (!live.url || t.screen.querySelector("iframe") || !t.visible) return;
+      var f = document.createElement("iframe");
+      f.src = live.url;
+      f.tabIndex = -1;
+      f.setAttribute("aria-hidden", "true");
+      f.setAttribute("sandbox", "allow-same-origin allow-scripts");
+      f.setAttribute("referrerpolicy", "no-referrer");
+      t.screen.insertBefore(f, t.placeholder);
+      t.placeholder.hidden = true;
+      t.liveUrl = live.url;
+    }).catch(function () { t.loading = false; delete t.node.dataset.loading; });
+  }
+
+  function updateTile(t, run, pause, order) {
+    var status = tileStatus(run, pause);
+    t.node.style.order = String(order);
+    t.node.className = "tile" + (status === "stuck" ? " stuck" : "");
+    t.node.setAttribute("aria-label", (run.task || run.runId) + ": " + status);
+    t.task.textContent = run.task || "Run " + run.runId.slice(0, 8);
+    t.sim.hidden = !last.simulated || last.simulatedLabel === "none";
+    t.chip.className = "chip" + (status === "working" ? " working" : status === "done" ? " done" : status === "expired" || status === "failed" ? " bad" : "");
+    if (status === "stuck" && pause.sessionExpiresAt) { t.chip.dataset.expires = String(pause.sessionExpiresAt); }
+    else delete t.chip.dataset.expires;
+    t.chip.textContent = status === "stuck" ? (pause.sessionExpiresAt ? remaining(pause.sessionExpiresAt).text : "Needs you")
+      : status === "working" ? "step " + run.steps
+      : status === "done" ? "Done" : status === "expired" ? "Expired" : status === "failed" ? "Failed"
+      : status === "sending" ? "Sending…" : "Starting";
+
+    syncTileScreen(t, run);
+    var hasFrame = !!t.screen.querySelector("iframe");
+    t.placeholder.hidden = hasFrame;
+    if (!hasFrame) {
+      t.placeholder.textContent = "";
+      var what = status === "done" ? "Finished" : status === "expired" ? "Browser ended" : status === "failed" ? "Failed"
+        : status === "starting" ? "Starting" : !run.live ? (status === "working" ? "Working · no browser yet" : "No browser")
+        : !t.visible || liveFrames() >= MAX_LIVE ? "Live · open to watch" : "Connecting";
+      var b = el("b", null, what);
+      var box = el("div"); box.appendChild(b);
+      box.appendChild(el("div", null, plural(run.steps, "step", "steps") + (run.cause ? " · " + run.cause : "")));
+      t.placeholder.appendChild(box);
+    }
+
+    t.tags.textContent = "";
+    if (run.skippedLogin) t.tags.appendChild(el("span", "tag skipped", "Skipped login"));
+    else if (run.contextId && status !== "stuck") t.tags.appendChild(el("span", "tag saved", "Saved login"));
+
+    var sig = status === "stuck" ? pause.id + "|" + pause.message + "|" + pause.hasBrowser + "|" + (pause.savedLogin ? pause.savedLogin.site : "") : "";
+    if (sig !== t.overSig) {
+      t.overSig = sig;
+      t.over.textContent = "";
+      t.over.hidden = status !== "stuck";
+      if (status === "stuck") {
+        t.over.appendChild(el("p", null, "“" + pause.message + "”"));
+        var row = el("div", "actions");
+        if (pause.savedLogin) {
+          var sign = el("button", "signin", "Sign in");
+          sign.title = "Sign in with the saved login for " + pause.savedLogin.site + " (" + pause.savedLogin.username + ")";
+          sign.onclick = function () { sign.disabled = true; sign.textContent = "Signing in…"; sendQuiet(pause, { type: "credentials", site: pause.savedLogin.site }).then(refresh); };
+          row.appendChild(sign);
+        }
+        if (pause.hasBrowser) {
+          var take = el("button", pause.savedLogin ? null : "primary", "Take over");
+          take.onclick = function () { openFocus(run.runId, true); };
+          row.appendChild(take);
+        }
+        var answer = el("button", pause.hasBrowser ? null : "primary", "Answer");
+        answer.onclick = function () { openFocus(run.runId); };
+        row.appendChild(answer);
+        t.over.appendChild(row);
+      }
+    }
+  }
+
+  function renderWall() {
+    var seen = {};
+    var expiryOf = function (r) { var p = pauseFor(r.runId); return p && p.state === "open" && p.sessionExpiresAt ? p.sessionExpiresAt : Infinity; };
+    // Waiting on a person first (soonest-expiring browser first), then working, then the rest, newest first.
+    var rank = function (r) { var s = tileStatus(r, pauseFor(r.runId)); return s === "stuck" ? 0 : s === "sending" ? 1 : s === "working" || s === "starting" ? 2 : 3; };
+    var ordered = last.runs.slice().sort(function (a, b) {
+      return rank(a) - rank(b) || expiryOf(a) - expiryOf(b) || b.createdAt - a.createdAt;
+    });
+    // Big tiles only for agents with something to watch or act on; finished ones are rows.
+    var active = ordered.filter(function (r) { return rank(r) < 3; });
+    var done = ordered.filter(function (r) { return rank(r) === 3; });
+    active.forEach(function (run, i) {
+      seen[run.runId] = true;
+      if (!tiles[run.runId]) tiles[run.runId] = makeTile(run.runId);
+      updateTile(tiles[run.runId], run, pauseFor(run.runId), i);
+    });
+    Object.keys(tiles).forEach(function (id) {
+      if (!seen[id]) { if (visibility) visibility.unobserve(tiles[id].node); tiles[id].node.remove(); delete tiles[id]; }
+    });
+    document.getElementById("empty").hidden = active.length > 0;
+    renderHistory(done);
+    renderBulk();
+  }
+
+  // Many agents stuck on the same thing: one action for all of them, still one delivery each.
+  var bulkSig = null;
+  function renderBulk() {
+    var open = last.interventions.filter(function (p) { return p.state === "open"; });
+    var bySite = {}, byQuestion = {};
+    open.forEach(function (p) {
+      if (p.savedLogin) (bySite[p.savedLogin.site] = bySite[p.savedLogin.site] || []).push(p);
+      else { var q = p.message.trim().toLowerCase().replace(/\s+/g, " "); (byQuestion[q] = byQuestion[q] || []).push(p); }
+    });
+    var groups = [];
+    Object.keys(bySite).forEach(function (site) { if (bySite[site].length > 1) groups.push({ kind: "site", site: site, pauses: bySite[site] }); });
+    Object.keys(byQuestion).forEach(function (q) { if (byQuestion[q].length > 1) groups.push({ kind: "question", pauses: byQuestion[q] }); });
+    var sig = groups.map(function (g) { return g.kind + ":" + g.pauses.map(function (p) { return p.id; }).join(","); }).join("|");
+    if (sig === bulkSig) return;   // do not wipe a half-typed answer
+    bulkSig = sig;
+    var box = document.getElementById("bulk"); box.textContent = "";
+    box.hidden = !groups.length;
+    groups.forEach(function (g) {
+      var row = el("div", "bulk-row");
+      var what = el("div", "what");
+      what.appendChild(el("b", null, String(g.pauses.length)));
+      var progress = el("span", "progress");
+      function sendAll(button, payloadFor) {
+        button.disabled = true;
+        var i = 0, ok = 0, done = 0;
+        function next() {
+          if (i >= g.pauses.length) return;
+          var p = g.pauses[i++];
+          sendQuiet(p, payloadFor(p)).then(function (good) {
+            ok += good ? 1 : 0; done += 1;
+            progress.textContent = done + " of " + g.pauses.length + " sent" + (done - ok ? " · " + (done - ok) + " not delivered" : "");
+            if (done === g.pauses.length) refresh(); else next();
+          });
+        }
+        for (var k = 0; k < 4; k++) next();
+      }
+      if (g.kind === "site") {
+        what.appendChild(document.createTextNode("agents are stuck on the " + g.site + " sign-in"));
+        row.appendChild(what);
+        var all = el("button", "signin", "Sign in all " + g.pauses.length + " as " + g.pauses[0].savedLogin.username);
+        all.onclick = function () { sendAll(all, function () { return { type: "credentials", site: g.site }; }); };
+        row.appendChild(all);
+      } else {
+        what.appendChild(document.createTextNode("agents asked: “" + g.pauses[0].message + "”"));
+        row.appendChild(what);
+        var input = el("input"); input.type = "text"; input.placeholder = "One answer for all of them"; input.setAttribute("aria-label", "Answer for all " + g.pauses.length);
+        var answerAll = el("button", "primary", "Answer all " + g.pauses.length);
+        answerAll.onclick = function () {
+          var text = input.value.trim();
+          if (!text) { progress.textContent = "Write an answer first."; return; }
+          if (looksSecret(text)) { progress.textContent = "This looks like a password or code: use a saved login or take over instead."; return; }
+          sendAll(answerAll, function () { return { type: "answer", text: text, secret: false }; });
+        };
+        input.onkeydown = function (e) { if (e.key === "Enter") answerAll.click(); };
+        row.appendChild(input); row.appendChild(answerAll);
+      }
+      row.appendChild(progress);
+      box.appendChild(row);
+    });
+  }
+
+  function renderHistory(runs) {
+    document.getElementById("history-section").hidden = !runs.length;
+    document.getElementById("history-n").textContent = String(runs.length);
+    var box = document.getElementById("history"); box.textContent = "";
+    var shown = showAllHistory ? runs : runs.slice(0, HISTORY_PAGE);
+    shown.forEach(function (run) {
+      var status = tileStatus(run, pauseFor(run.runId));
+      var row = el("button", "row");
+      row.type = "button";
+      var chip = el("span", "chip" + (status === "done" ? " done" : " bad"), status === "done" ? "Done" : status === "expired" ? "Expired" : "Failed");
+      row.appendChild(chip);
+      row.appendChild(el("span", "rtask", run.task || "Run " + run.runId.slice(0, 8)));
+      var tags = el("span", "rtags");
+      var p = pauseFor(run.runId);
+      if (run.skippedLogin) tags.appendChild(el("span", "tag skipped", "Skipped login"));
+      else if (p && p.resolution) tags.appendChild(el("span", "tag saved", p.resolution.type === "takeover" ? "You took over" : p.resolution.type === "credentials" ? "Signed in" : "You answered"));
+      row.appendChild(tags);
+      row.appendChild(el("span", "rmeta", plural(run.steps, "step", "steps") + " · " + clock(run.createdAt)));
+      row.setAttribute("aria-label", (run.task || run.runId) + ": " + chip.textContent);
+      row.onclick = function () { openFocus(run.runId); };
+      box.appendChild(row);
+    });
+    if (shown.length < runs.length) {
+      var more = el("button", "row more-row", "Show all " + runs.length);
+      more.type = "button";
+      more.onclick = function () { showAllHistory = true; renderHistory(runs); };
+      box.appendChild(more);
+    }
+  }
+
+  /* ---------- metrics (computed server-side, evidence.ts `metrics`) ---------- */
+  function renderMetrics(m) {
+    var box = document.getElementById("metrics"); box.textContent = "";
+    function cell(tag, value, label, sub, tone) {
+      var c = el(tag, "metric " + (tone || ""));
+      c.appendChild(el("b", null, value)); c.appendChild(el("div", "label", label)); c.appendChild(el("div", "sub", sub));
+      box.appendChild(c);
+      return c;
+    }
+    var w = cell("button", String(m.waiting.count), "Waiting for you",
+      m.waiting.count ? "oldest " + duration(m.waiting.oldestMs) + " · open it" : "nothing waiting", m.waiting.count ? "hot" : "none");
+    w.disabled = !m.waiting.count;
+    w.onclick = function () {
+      var first = last.runs.filter(function (r) { return tileStatus(r, pauseFor(r.runId)) === "stuck"; })
+        .sort(function (a, b) { return (pauseFor(a.runId).sessionExpiresAt || Infinity) - (pauseFor(b.runId).sessionExpiresAt || Infinity); })[0];
+      if (first) openFocus(first.runId);
+    };
+    cell("div", m.timeToHelp.medianMs === null ? "–" : duration(m.timeToHelp.medianMs), "Median time to help",
+      m.timeToHelp.count ? "pause to reply · " + plural(m.timeToHelp.count, "pause", "pauses") : "no pauses answered yet", m.timeToHelp.medianMs === null ? "none" : "");
+    cell("div", String(m.missed), "Missed", "browser ended before help", m.missed ? "bad" : "none");
+    cell("div", m.finishedWithoutPerson.of ? m.finishedWithoutPerson.count + "/" + m.finishedWithoutPerson.of : "–", "Finished without a person",
+      "completed, never paused", m.finishedWithoutPerson.count ? "" : "none");
+    cell("div", String(m.afterSavedSignIn), "After a saved sign-in", "later runs needing no one", m.afterSavedSignIn ? "good" : "none");
+  }
+
+  /* ---------- one agent, full size ---------- */
+  function openFocus(runId, takeover) {
+    location.hash = "run=" + encodeURIComponent(runId);
+    focusSig = null;
+    if (takeover) {
+      var p = pauseFor(runId);
+      if (p && p.state === "open") { startTakeover(p); return; }
+    }
+    renderFocus();
+  }
+  function closeFocus() {
+    history.replaceState(null, "", location.pathname);
+    focusSig = null; focusScreen = null;
+    document.getElementById("f-screen").textContent = "";
+    renderFocus();
+  }
+  function focusedRunId() { var m = location.hash.match(/^#run=(.+)$/); return m ? decodeURIComponent(m[1]) : null; }
+
+  function startTakeover(p) {
+    post("/api/interventions/" + encodeURIComponent(p.id) + "/takeover").then(function () {
+      focusSig = null;
+      return refresh();
+    });
+  }
+
+  // The big screen: interactive during a takeover, otherwise view-only while the browser is alive.
+  function renderFocusScreen(run, pause) {
+    var screen = document.getElementById("f-screen");
+    var want = pause && pause.state === "open" && pause.controller === "human" && pause.hasBrowser ? "takeover:" + pause.id
+      : run.live ? "view:" + run.runId : "none:" + run.runId;
+    if (want === focusScreen) return;
+    focusScreen = want;
+    screen.textContent = "";
+    screen.className = "screen" + (want.indexOf("takeover:") === 0 ? " interactive" : "");
+    var kind = want.split(":")[0];
+    if (kind === "none") {
+      var ph = el("div", "placeholder");
+      var box = el("div"); box.appendChild(el("b", null, run.status === "COMPLETED" ? "Finished" : "Browser ended"));
+      box.appendChild(el("div", null, "This run's browser is no longer running."));
+      ph.appendChild(box); screen.appendChild(ph);
+      return;
+    }
+    var url = kind === "takeover" ? "/api/interventions/" + encodeURIComponent(pause.id) + "/live" : "/api/runs/" + encodeURIComponent(run.runId) + "/live";
+    fetch(url).then(function (r) { return r.json(); }).then(function (live) {
+      if (focusScreen !== want) return;
+      if (!live.url) { screen.appendChild(el("div", "placeholder", "Live View is not available for this session.")); return; }
+      var f = document.createElement("iframe");
+      f.src = live.url;
+      f.title = kind === "takeover" ? "The agent's browser (you have control)" : "The agent's browser (view only)";
+      f.setAttribute("sandbox", kind === "takeover" ? "allow-same-origin allow-scripts allow-forms" : "allow-same-origin allow-scripts");
+      f.setAttribute("allow", "clipboard-read; clipboard-write");
+      f.setAttribute("referrerpolicy", "no-referrer");
+      if (kind !== "takeover") f.tabIndex = -1;
+      screen.appendChild(f);
+    });
+  }
+
+  // What the side panel is built from. For a run waiting on a person, only the pause
+  // itself counts: liveness and step count change the big screen, not the panel, and a
+  // rebuild while someone is typing would lose their reply.
+  function focusSignature(run, pause) {
+    var p = pause ? [pause.id, pause.state, pause.receipt, pause.controller, pause.detail, pause.attempts,
+                     pause.savedLogin ? pause.savedLogin.site : "",
+                     pause.after ? pause.after.steps.length + ":" + pause.after.typed : ""].join(",") : "none";
+    return pause && pause.state === "open" ? p : [run.runId, run.status, run.skippedLogin, run.steps > 0, p].join("|");
+  }
+
+  function renderFocus() {
+    var id = focusedRunId();
+    var run = id && last ? runById(id) : null;
+    document.getElementById("wall-view").hidden = !!run;
+    document.getElementById("focus").hidden = !run;
+    if (!run) return;
+    var pause = pauseFor(run.runId);
+    var status = tileStatus(run, pause);
+    var ftile = document.getElementById("f-tile");
+    ftile.className = "tile" + (status === "stuck" ? " stuck" : "");
+    var takingOver = pause && pause.state === "open" && pause.controller === "human" && pause.hasBrowser;
+    var showScreen = run.live || takingOver;
+    ftile.hidden = !showScreen;
+    document.querySelector(".focus-grid").classList.toggle("no-screen", !showScreen);
+    document.getElementById("f-task").textContent = (run.task || "Run " + run.runId.slice(0, 8)) +
+      (pause && pause.state === "open" && pause.controller === "human" ? " — you have control" : "");
+    var chip = document.getElementById("f-chip");
+    chip.className = "chip";
+    if (status === "stuck" && pause.sessionExpiresAt) chip.dataset.expires = String(pause.sessionExpiresAt); else delete chip.dataset.expires;
+    chip.textContent = status === "stuck" ? (pause.sessionExpiresAt ? remaining(pause.sessionExpiresAt).text : "Needs you")
+      : status === "working" ? "step " + run.steps : status.charAt(0).toUpperCase() + status.slice(1);
+    if (showScreen) renderFocusScreen(run, pause);
+    else if (focusScreen) { focusScreen = null; document.getElementById("f-screen").textContent = ""; }
+
+    var sig = focusSignature(run, pause);
+    if (sig === focusSig) return;   // never rebuild under a person's typing
+    focusSig = sig;
+    var side = document.getElementById("f-side");
+    // Keep a half-typed reply (and the cursor) across a rebuild of the same pause.
+    var draftBox = side.querySelector("textarea.reply");
+    var draft = draftBox && draftBox.dataset.pause === (pause && pause.id) ? { text: draftBox.value, focused: document.activeElement === draftBox, at: draftBox.selectionStart } : null;
+    side.textContent = "";
+
+    if (!pause) {
+      side.appendChild(el("div", "state " + (status === "done" ? "done" : status === "working" ? "running" : status), status === "done" ? "Finished" : status === "working" ? "Working" : status));
+      side.appendChild(el("p", "ask", "This agent hasn't needed anyone."));
+      var dd = el("details", "more");
+      dd.appendChild(el("summary", null, "Original task"));
+      var t = el("p", "task", null); t.appendChild(el("b", null, run.task)); dd.appendChild(t);
+      dd.appendChild(el("div", "meta", "run " + run.runId.slice(0, 8) + " · started " + clock(run.createdAt) + " · " + plural(run.steps, "step", "steps")));
+      side.appendChild(dd);
+      if (run.skippedLogin) side.appendChild(el("div", "proof", "It went past the login on its own: a person signed in once with this saved login in an earlier run."));
+      else if (run.contextId) side.appendChild(el("div", "meta", "Uses saved login " + run.contextId.slice(0, 8) + "."));
+      return;
+    }
+
+    // 1. Status and time left.  2. The question.  3. What to do.  4. Everything else, folded.
+    var statusRow = el("div", "status-row");
+    statusRow.appendChild(el("span", "state " + pause.state, STATE_TEXT[pause.state] || pause.state));
+    if (pause.sessionExpiresAt && (pause.state === "open" || pause.state === "outcome_unknown")) {
+      var ends = el("span", "ends", "browser ends in ");
+      var big = el("b", "big-timer"); big.dataset.expires = String(pause.sessionExpiresAt); ends.appendChild(big);
+      statusRow.appendChild(ends);
+    }
+    side.appendChild(statusRow);
+    side.appendChild(el("p", "ask", pause.message));
+    if (pause.state === "open") {
+      side.appendChild(actions(pause));
+      var fresh = side.querySelector("textarea.reply");
+      if (fresh && draft && draft.text) {
+        fresh.value = draft.text;
+        if (draft.focused) { fresh.focus(); fresh.setSelectionRange(draft.at, draft.at); }
+      }
+    }
+    else side.appendChild(receipt(pause));
+
+    var d = el("details", "more");
+    d.appendChild(el("summary", null, "Original task"));
+    var task = el("p", "task", null); task.appendChild(el("b", null, pause.task || run.task)); d.appendChild(task);
+    d.appendChild(el("div", "meta", "run " + run.runId.slice(0, 8) + " · paused " + clock(pause.pausedAt)));
+    if (pause.steps && pause.steps.length) {
+      d.appendChild(el("div", "meta", "What the agent did before pausing:"));
       var ol = el("ol", "steps");
-      p.steps.forEach(function (s) {
+      pause.steps.forEach(function (s) {
         var li = el("li");
         if (s.kind === "tool-call") { li.appendChild(el("code", null, s.toolName)); li.appendChild(document.createTextNode(" " + s.text)); }
         else li.textContent = s.text;
         ol.appendChild(li);
       });
       d.appendChild(ol);
-      c.appendChild(d);
     }
-
-    if (p.state === "open") c.appendChild(actions(p));
-    else c.appendChild(receipt(p));
-    return c;
+    side.appendChild(d);
+    tickAll();
   }
 
   function actions(p) {
-    var box = el("div", "reply");
+    var box = el("div"); box.style.display = "grid"; box.style.gap = "10px";
     if (p.detail) box.appendChild(el("div", "result bad", p.detail));
-    var answer = el("textarea"); answer.placeholder = "Answer the agent"; answer.setAttribute("aria-label", "Answer the agent");
-    var secretLabel = el("label", "check");
-    var secret = el("input"); secret.type = "checkbox";
-    secretLabel.appendChild(secret);
-    secretLabel.appendChild(document.createTextNode("This is a secret (a code or password): send it as a variable and don't store it"));
+    var result = el("div", "result");
+    var human = p.controller === "human" && p.hasBrowser;
+
+    if (human) {
+      if (p.contextId) box.appendChild(el("p", "carry", "Saved login " + p.contextId.slice(0, 8) + ": sign in here once, and later runs with it start signed in."));
+      box.appendChild(el("div", "meta", "You have control of the browser on the left. When you're done, hand it back."));
+      var back = el("button", "primary", "Hand back to agent");
+      back.onclick = function () { send(p, { type: "takeover", note: null }, [back], result); };
+      var r = el("div", "actions"); r.appendChild(back); box.appendChild(r);
+      box.appendChild(result);
+      return box;
+    }
+
+    if (p.savedLogin) {
+      var signIn = el("button", "signin", "Sign in as " + p.savedLogin.username + " (saved login)");
+      signIn.onclick = function () { send(p, { type: "credentials", site: p.savedLogin.site }, [signIn], result); };
+      box.appendChild(signIn);
+      box.appendChild(el("div", "meta", "The password stays in your Keychain; the agent only sees a placeholder."));
+    }
+    // One field and Enter to send. Passwords are caught by the guard below, which offers
+    // to send them as a secret, so there is no separate checkbox.
+    var answer = el("textarea", "reply"); answer.rows = 2; answer.dataset.pause = p.id; answer.placeholder = "Reply to the agent…"; answer.setAttribute("aria-label", "Reply to the agent");
     var row = el("div", "actions");
     var sendBtn = el("button", "primary", "Send answer");
-    var takeBtn = el("button", null, p.controller === "human" ? "Browser open — continue below" : "Take over the browser");
-    row.appendChild(sendBtn);
+    var takeBtn = el("button", null, "Take over");
     if (p.hasBrowser) row.appendChild(takeBtn);
-    else row.appendChild(el("span", "meta", "No browser to take over: this run has not opened one."));
-    var result = el("div", "result");
-    box.appendChild(answer); box.appendChild(secretLabel); box.appendChild(row); box.appendChild(result);
+    row.appendChild(sendBtn);
+    var guard = el("div", "guard"); guard.hidden = true;
+    box.appendChild(answer); box.appendChild(row); box.appendChild(guard); box.appendChild(result);
 
-    var takeoverArea = el("div");
-    box.appendChild(takeoverArea);
-
-    sendBtn.onclick = function () {
-      if (!answer.value.trim()) { result.className = "result bad"; result.textContent = "Write an answer first."; return; }
-      send(p, { type: "answer", text: answer.value, secret: secret.checked }, [sendBtn, takeBtn], result);
-    };
-    function openBrowser() {
-      takeBtn.disabled = true;
-      post("/api/interventions/" + encodeURIComponent(p.id) + "/takeover").then(function () {
-        return fetch("/api/interventions/" + encodeURIComponent(p.id) + "/live").then(function (r) { return r.json(); });
-      }).then(function (live) {
-        takeoverArea.textContent = "";
-        var frameBox = el("div", "live");
-        if (live.url) {
-          var f = document.createElement("iframe");
-          f.src = live.url;
-          f.setAttribute("sandbox", "allow-same-origin allow-scripts allow-forms");
-          f.setAttribute("allow", "clipboard-read; clipboard-write");
-          f.setAttribute("referrerpolicy", "no-referrer");
-          frameBox.appendChild(f);
-        } else frameBox.appendChild(el("p", "meta", "Live View is not available for this session."));
-        if (p.contextId) {
-          var carry = el("p", "carry");
-          carry.appendChild(document.createTextNode("This run uses saved login " + p.contextId.slice(0, 8) + ". "));
-          carry.appendChild(el("b", null, "If you sign in here, later runs with this saved login can start signed in."));
-          takeoverArea.appendChild(carry);
-        }
-        takeoverArea.appendChild(frameBox);
-        var note = el("textarea"); note.setAttribute("aria-label", "What you did"); note.placeholder = "What you did (optional — never type codes or passwords here)";
-        var back = el("button", "primary", "Hand back to agent");
-        var backRow = el("div", "actions"); backRow.appendChild(back);
-        takeoverArea.appendChild(note); takeoverArea.appendChild(backRow);
-        back.onclick = function () { send(p, { type: "takeover", note: note.value || null }, [back, sendBtn], result); };
-      });
+    function sendAnswer(asSecret) {
+      guard.hidden = true;
+      send(p, { type: "answer", text: answer.value, secret: asSecret }, [sendBtn, takeBtn], result);
     }
-    takeBtn.onclick = openBrowser;
-    if (p.controller === "human" && p.hasBrowser) openBrowser();
+    answer.onkeydown = function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendBtn.click(); } };
+    sendBtn.onclick = function () {
+      if (!answer.value.trim()) { result.className = "result bad"; result.textContent = "Write a reply first."; return; }
+      // A password sent as a plain answer is stored and lands in the agent's transcript.
+      // Stop and offer the safe options first.
+      if (looksSecret(answer.value)) {
+        guard.textContent = "";
+        guard.appendChild(el("p", null, "This looks like a password or code. As a plain answer it would be stored here and written into the agent's log."));
+        var g = el("div", "actions");
+        var asSecret = el("button", "primary", "Send as a secret");
+        var anyway = el("button", null, "Send as plain text");
+        asSecret.onclick = function () { sendAnswer(true); };
+        anyway.onclick = function () { sendAnswer(false); };
+        g.appendChild(asSecret); g.appendChild(anyway);
+        guard.appendChild(g);
+        if (p.hasBrowser) guard.appendChild(el("div", "meta", "Safest: take over and type it into the page yourself."));
+        guard.hidden = false;
+        return;
+      }
+      sendAnswer(false);
+    };
+    takeBtn.onclick = function () { takeBtn.disabled = true; startTakeover(p); };
     return box;
   }
 
   function receipt(p) {
     var r = el("div", "receipt");
     if (p.resolution) {
-      var what = p.resolution.type === "takeover" ? "You took over and handed back" : "You answered";
+      var what = p.resolution.type === "takeover" ? "You took over and handed back" : p.resolution.type === "credentials" ? "Signed in with a saved login" : "You answered";
       r.appendChild(el("div", null, what + (p.resolution.summary ? ": " + p.resolution.summary : "")));
       if (p.resolution.page) r.appendChild(el("div", "meta", "Left the browser on: " + p.resolution.page.title + " — " + p.resolution.page.url));
     }
@@ -333,108 +806,41 @@
     return r;
   }
 
-  function signature(p) {
-    return [p.state, p.receipt, p.controller, p.detail, p.attempts, p.task ? 1 : 0, p.contextId,
-            p.after ? p.after.steps.length + ":" + p.after.typed : ""].join("|");
-  }
-
-  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
-  // One story per Context: who helped, then which later runs finished without asking.
-  function renderLogins(stories) {
-    var box = document.getElementById("logins"); box.textContent = "";
-    document.getElementById("logins-section").hidden = !stories.length;
-    stories.forEach(function (st) {
-      var c = el("section", "story");
-      var h = el("h3");
-      if (st.helps) {
-        h.appendChild(document.createTextNode("You helped " + (st.helps === 1 ? "once" : st.helps + " times") + ". "));
-        h.appendChild(el("em", null, st.laterWithoutHelp ? plural(st.laterWithoutHelp, "later run", "later runs") + " didn't need you." : "No later run yet."));
-      } else h.textContent = plural(st.runs.length, "run uses", "runs use") + " this saved login.";
-      c.appendChild(h);
-      c.appendChild(el("div", "meta", "Saved login " + st.contextId.slice(0, 8) + " · a Browserbase Context shared by these runs"));
-      var ol = el("ol", "timeline");
-      var firstHelp = null;
-      st.runs.forEach(function (run) {
-        if (run.helpedAt && firstHelp === null) firstHelp = run.helpedAt;
-        var free = firstHelp !== null && !run.helped && run.pauses === 0 && run.status === "COMPLETED" && run.createdAt > firstHelp;
-        var li = el("li", run.helped ? "helped" : free ? "free" : "");
-        var what = run.helped === "takeover" ? "Paused for you. You took over and handed back."
-          : run.helped === "answer" ? "Paused for you. You answered."
-          : run.pauses ? "Paused, waiting for you."
-          : run.status === "COMPLETED" ? "Finished without asking you."
-          : run.status === "RUNNING" || run.status === "PENDING" ? "Running." : (run.status || "Loading").toLowerCase() + ".";
-        li.appendChild(el("div", "what", what));
-        li.appendChild(el("div", "meta", "Run " + run.runId.slice(0, 8) + " · started " + clock(run.createdAt) + " · " + run.task));
-        ol.appendChild(li);
-      });
-      c.appendChild(ol);
-      box.appendChild(c);
+  /* ---------- timers and polling ---------- */
+  function tickAll() {
+    document.querySelectorAll("[data-expires]").forEach(function (n) {
+      var r = remaining(Number(n.dataset.expires));
+      n.textContent = r.text;
+      if (n.classList.contains("big-timer")) n.className = "big-timer " + r.level;
+      var t = n.closest(".tile");
+      if (t) t.classList.toggle("urgent", r.level === "now" || r.level === "ended");
     });
   }
 
   function refresh() {
-    fetch("/api/state").then(function (r) { return r.json(); }).then(function (s) {
+    return fetch("/api/state").then(function (r) { return r.json(); }).then(function (s) {
+      last = s;
       clockOffset = s.now - Date.now();
-      document.getElementById("sim").hidden = !s.simulated;
-
-      var counts = document.getElementById("counts"); counts.textContent = "";
-      BUCKETS.forEach(function (b) {
-        var n = s.runs.filter(function (r) { return r.bucket === b[0]; }).length;
-        var li = el("li", !n ? "zero" : b[0] === "needs_attention" ? "attn" : "");
-        li.appendChild(el("b", null, String(n))); li.appendChild(document.createTextNode(b[1].toLowerCase()));
-        counts.appendChild(li);
-      });
-      var waiting = s.interventions.filter(function (p) { return p.state === "open"; }).length;
-      document.getElementById("open-n").textContent = s.interventions.length ? waiting + " waiting for you" : "";
-
-      if (!s.interventions.length) { pausesEl.innerHTML = '<p class="empty">No run has paused yet.</p>'; rendered = {}; }
-      else {
-        var empty = pausesEl.querySelector(".empty"); if (empty) empty.remove();
-        var seen = {};
-        s.interventions.forEach(function (p, i) {
-          seen[p.id] = true;
-          var had = rendered[p.id];
-          if (!had || had.sig !== signature(p)) {
-            var node = card(p);
-            if (had) pausesEl.replaceChild(node, had.node); else pausesEl.appendChild(node);
-            rendered[p.id] = { node: node, sig: signature(p) };
-          }
-          if (pausesEl.children[i] !== rendered[p.id].node) pausesEl.insertBefore(rendered[p.id].node, pausesEl.children[i] || null);
-        });
-        Object.keys(rendered).forEach(function (id) { if (!seen[id]) { rendered[id].node.remove(); delete rendered[id]; } });
-      }
-
-      renderLogins(s.savedLogins || []);
-
-      var runsEl = document.getElementById("runs"); runsEl.textContent = "";
-      if (!s.runs.length) { runsEl.appendChild(el("p", "empty", "No runs tracked yet.")); return; }
-      var table = el("table"); var head = el("tr", "head");
-      ["Task", "Status", "Started"].forEach(function (h) { head.appendChild(el("th", null, h)); });
-      table.appendChild(head);
-      s.runs.forEach(function (r) {
-        var tr = el("tr");
-        var task = el("td", null, r.task || r.runId);
-        if (r.cause) task.appendChild(el("span", "cause", r.cause));
-        tr.appendChild(task);
-        var label = (BUCKETS.find(function (b) { return b[0] === r.bucket; }) || [0, r.status])[1];
-        var status = el("td", "status s-" + r.bucket, label);
-        status.title = r.status;
-        tr.appendChild(status);
-        tr.appendChild(el("td", "time", clock(r.createdAt)));
-        table.appendChild(tr);
-      });
-      runsEl.appendChild(table);
+      document.getElementById("sim").hidden = !s.simulated || s.simulatedLabel !== "banner";
+      document.getElementById("demo-tag").hidden = !(s.simulated && s.simulatedLabel === "tag");
+      var working = s.runs.filter(function (r) { return r.live; }).length;
+      document.getElementById("lede").textContent = "Browserbase Agents · " + plural(s.runs.length, "run", "runs") + " · " + working + " with a live browser";
+      renderMetrics(s.metrics);
+      renderWall();
+      renderFocus();
+      tickAll();
     }).catch(function () {});
   }
 
+  document.getElementById("back").onclick = closeFocus;
+  window.addEventListener("hashchange", function () { focusSig = null; focusScreen = null; renderFocus(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && focusedRunId()) closeFocus(); });
   document.getElementById("track").onsubmit = function (e) {
     e.preventDefault();
     var id = document.getElementById("track-id").value.trim();
     if (id) post("/api/runs", { runId: id }).then(refresh);
   };
-  setInterval(function () {
-    document.querySelectorAll(".timer").forEach(tick);
-  }, 1000);
+  setInterval(tickAll, 1000);
   refresh();
   setInterval(refresh, 2000);
 </script>

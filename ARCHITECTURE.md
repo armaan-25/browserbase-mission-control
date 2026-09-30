@@ -63,7 +63,7 @@ someone else resumed ─▶             superseded
 | `inbox/sync.ts` | server | The poller: discover runs, read run + messages + session, create cards, reconcile. `recover()` on start. |
 | `inbox/resolve.ts` | server | One reply → one resume attempt. Builds the body (secrets as variables, takeover with the current tab). |
 | `inbox/server.ts` | server | HTTP API and the page. Loopback only, Host/Origin checks. |
-| `inbox/page.html` | person's browser | Counts per bucket, cards, Live View, idempotency keys in `sessionStorage`. |
+| `inbox/page.html` | person's browser | Mission control: one tile per run with its live browser (Live View, view-only), stuck runs in orange with the agent's question; opening a tile gives the full browser (interactive only during a takeover) and every action: answer (with the password guard), take over, hand back, receipts. Real metrics in the header. Idempotency keys in `sessionStorage`. |
 | `inbox/evidence.ts` | pure | What the page can prove: runs grouped by the Context their session used (`savedLogins`), and what the agent did after a reply, including whether it typed (`afterReply`). |
 | `inbox/fake-browserbase.ts` | tests, demo | **SIMULATED** Agents API with scripted runs and fault injection. Undocumented behaviour is marked GUESS. |
 | `inbox/serve.ts`, `inbox/demo.ts` | — | Entry points: real Browserbase, or the simulated demo. |
@@ -79,8 +79,8 @@ someone else resumed ─▶             superseded
 | Never blindly resend | 409, 500, and no answer all become `outcome_unknown`; only the poller settles it, by reading the run. Every idempotency key ever used on a pause is kept, so resending any earlier click (after a lost response, or after the card reopened) sends nothing | After the grace period, "still paused on the same pause" is taken to mean the reply did not land. If Browserbase applied it later still, a person's new reply would then get a 409. |
 | Stale reads cannot undo newer ones | Syncs of one run never overlap; every judgement is dated by when its reads began, and evidence older than the card or reply it would judge is ignored. `test/agents-flow.test.ts` "overlapping syncs" fails with both removed and passes with either | — |
 | Confirm the agent got the reply | `reply_seen` when the transcript's pause result contains our text; `moved_past` when the run moved on but the text is not visible; `accepted` on 202 | Confirmed live: the pause result is a JSON `tool-result` with `value.reply` = our text. |
-| Secrets not stored | Secret answers go in `variables` (`%human_reply%`); only a marker is stored; `/resume` response bodies are never kept (an echoed request would carry the secret); all stored text is redacted | Redaction is pattern-based (6–10 digit runs, key prefixes). If Browserbase writes the *substituted* secret into the pause's tool-result (unverified; the docs say values never enter the transcript), redaction is the only protection, and the receipt would read `superseded`. |
-| Honest expiry | Session status / `expiresAt` polled; `TIMED_OUT` or an ended session → `expired`, with a recovery message | What a paused run's status becomes at session expiry, before any resume, is undocumented. |
+| Secrets not stored | An answer that looks like a password or code (`looksSecret` in `page.html`) is held back until the person chooses "send as a secret" or plain text; secret answers go in `variables` (`%human_reply%`); only a marker is stored; `/resume` response bodies are never kept (an echoed request would carry the secret); all stored text is redacted | Redaction is pattern-based (6–10 digit runs, key prefixes). If Browserbase writes the *substituted* secret into the pause's tool-result (unverified; the docs say values never enter the transcript), redaction is the only protection, and the receipt would read `superseded`. |
+| Honest expiry | Session status / `expiresAt` polled; `TIMED_OUT` or an ended session → `expired`, with a recovery message | Live (2026-09-29): at the session's limit the session becomes `COMPLETED` while the run still says `PAUSED` (6+ min later). So `PAUSED` alone does not mean anyone can still help; the inbox goes by the session. |
 | Takeover | Live View URL fetched per request, only while the pause is open; on hand-back the current tab (`/debug` `pages[]`) is sent to the agent | Whether people may act in a paused run's browser, and whether the agent notices on resume, is **unverified** live. The inbox cannot stop the agent from acting outside the pause. |
 
 ## Confirmed against live Browserbase (Run 1, 2026-09-28, Free plan)
@@ -147,9 +147,18 @@ Context `dce29935…`, `persist: true`, 30 s between runs.
   password is in the run transcript. The Context does not care who signed in.
 - Browserbase accepted both runs although the dashboard showed 3/3 Agent runs used.
 
+## A paused run outlives its browser (Run 4, 2026-09-29, Free plan)
+
+Run `f4b58dc1…` paused at the test site's login at 5:43 PM ET and was never
+answered. Its session `d48f994f…` ended at its 60-minute limit (6:44 PM,
+status `COMPLETED`), yet at 6:50 PM Browserbase still reported the run as
+`PAUSED`. The inbox showed the card as expired, with recovery text, because it
+reads the session rather than trusting `PAUSED`. The same attempt found a
+crash: a timed-out read left a rejected promise unhandled in `sync.ts` and
+stopped the process; fixed, and `remember.ts` now retries failed reads.
+
 ## Unverified against live Browserbase
 
-- What a paused run's status becomes when its session expires before a resume.
 - Whether people may act in a paused run's browser through Live View, and whether
   the agent notices the change on resume.
 - Whether a 500 "outcome unknown" can take effect later than a few seconds.
@@ -179,6 +188,21 @@ nothing" is the evidence that a person, not the agent, signed in.
 Unverified live: whether an Agents run's browser writes a person's Live View
 sign-in into the Context, and whether an agent that finds itself signed in skips
 the browser entirely (live Run 1 used an HTTP strategy with no session).
+
+## At scale
+
+Measured with 60 simulated runs and 30 ms simulated latency per Browserbase call
+(`startFakeBrowserbase({ latencyMs })`):
+
+| Where | What keeps it bounded | Measured |
+|---|---|---|
+| Poller | Runs are read up to 6 at a time (`createSync({ concurrency })`); each run's own syncs still never overlap | First pass over 60 runs: ~1.2 s. `test/agents-flow.test.ts` "at scale" fails at concurrency 1 (5.2 s) |
+| `/api/state` | Step counts and pauses come from one grouped query each (`stepCounts`, `interventionsByRun`); the proof read starts at the reply (`partsFromPauseResult`); indexes on `run_id` | 42 KB, median 3 ms |
+| Page | A tile plays its live browser only while on screen, at most 12 at once, counting previews still loading; finished runs are rows, 25 until "Show all" | 12 live previews with 45 active tiles; no console errors |
+| Shutdown | `sync.stop()` resolves after a check in progress, before the store closes | — |
+
+Not yet handled: discovery reads only the first page of `GET /v1/agents/runs`
+(100 runs); a project with more recent runs than that needs cursor paging.
 
 ## Replacing a piece
 
