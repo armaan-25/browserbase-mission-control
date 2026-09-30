@@ -1,9 +1,9 @@
 {
-  "name": "browser-write-lease",
+  "name": "browserbase-mission-control",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "An inbox for Browserbase Agents runs that pause for a person, where a person's help carries over to later runs",
+  "description": "Mission Control for Browserbase Agents: stuck agents reach a person, safely",
   "engines": {
     "node": ">=22.18"
   },
